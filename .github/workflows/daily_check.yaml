@@ -2,8 +2,8 @@ name: QQQ Daily Monitor
 
 on:
   schedule:
-    # Runs at 20:30 ET (00:30 UTC during DST)
     - cron: '30 0 * * 1-5' 
+  workflow_dispatch:
 
 jobs:
   monitor:
