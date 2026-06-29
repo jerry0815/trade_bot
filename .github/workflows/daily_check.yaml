@@ -24,7 +24,8 @@ jobs:
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         run: python bot.py
-       - name: Read Signal Status
+
+      - name: Read Signal Status
         id: check_status
         run: echo "changed=$(cat signal_changed.txt)" >> $GITHUB_OUTPUT
       
