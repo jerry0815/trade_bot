@@ -20,9 +20,9 @@ def calculate_signal(data):
     atr = tr.rolling(window=14).mean()
     
     # Get latest data point (using only the last day)
-    latest_close = data['Close'].iloc[-1]
-    latest_sma = sma200.iloc[-1]
-    latest_atr = atr.iloc[-1]
+    latest_close = float(data['Close'].iloc[-1].item())
+    latest_sma = float(sma200.iloc[-1].item())
+    latest_atr = float(atr.iloc[-1].item())
     
     # Calculate bands based on latest day
     upper_band = latest_sma + (latest_atr * atr_multiplier)
