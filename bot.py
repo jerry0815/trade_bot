@@ -9,7 +9,7 @@ def calculate_signal(data):
     """
     Core strategy function: Calculates signal based on triple filter (SMA + ATR + Confirmation)
     """
-    buffer = 0.03
+    atr_multiplier = 2.5
     sma200 = data['Close'].rolling(window=200).mean()
     
     # Calculate ATR (14-day)
@@ -19,19 +19,17 @@ def calculate_signal(data):
     tr = pd.concat([high - low, (high - prev_close).abs(), (low - prev_close).abs()], axis=1).max(axis=1)
     atr = tr.rolling(window=14).mean()
     
-    # Get last 3 days
-    last_3_days = data.iloc[-3:]
-    last_3_sma = sma200.iloc[-3:]
-    last_3_atr = atr.iloc[-3:]
+    # Get latest data point (using only the last day)
+    latest_close = data['Close'].iloc[-1]
+    latest_sma = sma200.iloc[-1]
+    latest_atr = atr.iloc[-1]
     
-    # FIX: Using .values ensures we are comparing raw numbers, not DataFrame objects
-    close_prices = last_3_days['Close'].values
-    upper_band = (last_3_sma + last_3_atr).values * (1 - buffer)
-    lower_band = (last_3_sma - last_3_atr).values * (1 - buffer)
+    # Calculate bands based on latest day
+    upper_band = latest_sma + (latest_atr * atr_multiplier)
+    lower_band = latest_sma - (latest_atr * atr_multiplier)
     
-    # Check if signal is valid for all last 3 days
-    is_bullish = (close_prices > upper_band).all()
-    is_bearish = (close_prices < lower_band).all()
+    is_bullish = (latest_close > upper_band)
+    is_bearish = (latest_close < lower_band)
     
     if is_bullish:
         return "Bullish (UP)", "🚀 **Strong Signal: Hold/Add TQQQ + QQQ positions**"
