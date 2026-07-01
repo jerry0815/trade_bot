@@ -6,25 +6,28 @@ on:
   workflow_dispatch:
 
 jobs:
-  monitor:
+  run-bot:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
-
+          
       - name: Install dependencies
         run: pip install -r requirements.txt
-
-      - name: Run Monitor
+        
+      - name: Run Bot
+        run: python bot.py
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-        run: python bot.py
-
+      
       - name: Read Signal Status
         id: check_status
         run: echo "changed=$(cat signal_changed.txt)" >> $GITHUB_OUTPUT
@@ -36,4 +39,4 @@ jobs:
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           git add last_signal.txt
           git commit -m "Update last_signal.txt: Signal Changed"
-          git push origin
+          git push
