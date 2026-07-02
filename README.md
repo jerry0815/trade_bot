@@ -11,6 +11,31 @@ The system acts as a disciplined guardrail for your investment:
 * **Bearish Signal:** The system triggers a defensive alert, suggesting a move to cash or short-term treasury bills (e.g., SGOV/BIL) to avoid catastrophic drawdown risks.
 * **Disciplined Execution:** By automating the calculation daily, it removes emotional bias and ensures strict adherence to the moving average discipline.
 
+### Table 1: Lump Sum Performance
+*Backtest Parameters: 26-year rolling periods starting from 1980-01-15.*
+*Initial Investment: $10,000*
+
+| Leverage | Strategy | Avg TWR | Med TWR | Worst TWR | Max DD | Avg Trades |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **3x** | **Buy & Hold** | 2.01% | 1.85% | -7.44% | -99.97% | **0.0** |
+| **3x** | **SMA 200 (ATR x2.5)** | **20.69%** | **21.93%** | **11.71%** | **-81.87%** | 24.0 |
+| **3x** | **EMA 50/200** | 19.05% | 20.21% | 9.60% | -91.31% | 23.0 |
+| **3x** | **VIX < 25** | -3.03% | -2.84% | -10.13% | -99.85% | 169.0 |
+| **3x** | **RSI 30/70** | -6.87% | -6.96% | -14.74% | -99.53% | 36.0 |
+| | | | | | | |
+| **2x** | **Buy & Hold** | 10.45% | 10.16% | 2.77% | -98.78% | **0.0** |
+| **2x** | **SMA 200 (ATR x2.5)** | **18.96%** | **19.77%** | 11.76% | **-62.49%** | 24.0 |
+| **2x** | **EMA 50/200** | 18.26% | 18.81% | **12.19%** | -70.29% | 23.0 |
+| **2x** | **VIX < 25** | 2.67% | 2.86% | -3.07% | -98.24% | 169.0 |
+| **2x** | **RSI 30/70** | 0.93% | 0.81% | -4.45% | -95.79% | 36.0 |
+| | | | | | | |
+| **1x** | **Buy & Hold** | 11.49% | 11.61% | 6.76% | -82.67% | **0.0** |
+| **1x** | **SMA 200 (ATR x2.5)** | **13.33%** | 13.42% | 8.87% | **-35.76%** | 24.0 |
+| **1x** | **EMA 50/200** | 13.23% | **13.53%** | **9.29%** | -39.94% | 23.0 |
+| **1x** | **VIX < 25** | 5.23% | 5.54% | 1.59% | -83.44% | 169.0 |
+| **1x** | **RSI 30/70** | 4.60% | 4.52% | 2.30% | -72.05% | 36.0 |
+
+
 ---
 
 ### **Strategy Research & Theoretical Basis**

@@ -4,6 +4,7 @@ import os
 import datetime
 import pandas as pd
 import sys
+from backtest.strat_backtest import *
 
 def calculate_signal(data):
     """
@@ -38,60 +39,59 @@ def calculate_signal(data):
     else:
         return "Neutral (Range)", "🛡️ **Waiting: Price within ATR channel, no action required**"
 
-def run_bot():
-    webhook_url = os.environ.get("DISCORD_WEBHOOK")
-    ticker = "QQQ"
+def generate_market_report(strategy, monitor_ticker="QQQ", leveraged_ticker="TQQQ"):
+    """
+    Fetches strategy stats and formats them into your report template.
+    """
+
     state_file = "last_signal.txt"
     flag_file = "signal_changed.txt"
-    
-    # Fetch data
-    data_qqq = yf.download(ticker, period="1y") 
-    tqqq_info = yf.Ticker("TQQQ").history(period="1d")
-    
-    # Execute strategy
-    trend, action = calculate_signal(data_qqq)
-    
-    # Check if signal has changed
+    #Get the stats dictionary from the strategy
+    stats = strategy.get_live_stats(monitor_ticker, leveraged_ticker)
+    trend = stats["trend"]
+
     last_signal = ""
     if os.path.exists(state_file):
         with open(state_file, "r") as f:
             last_signal = f.read().strip()
             
     signal_changed = (trend != last_signal)
-    
-    # Save status for GitHub Actions workflow
     with open(flag_file, "w") as f:
         f.write("true" if signal_changed else "false")
     
-    # Save current signal if changed
     if signal_changed:
         with open(state_file, "w") as f:
             f.write(trend)
     
     change_alert = "🔄 **Signal Change Detected!**" if signal_changed else "✅ Status: No change in signal."
-    
-    # Get latest price info
-    qqq_price = float(data_qqq['Close'].iloc[-1])
-    tqqq_price = float(tqqq_info['Close'].iloc[-1])
-    current_sma = float(data_qqq['Close'].rolling(window=200).mean().iloc[-1])
-    date_str = datetime.datetime.now().strftime("%Y-%m-%d")
-    
-    # Format notification message
+
+    date_str = pd.Timestamp.now().strftime("%Y-%m-%d")
+
+    # We use .get(key, default) for custom fields so the report doesn't crash 
+    # if a strategy doesn't provide them.
     message = (
         f"📅 **Market Monitor Report ({date_str})**\n"
         f"{change_alert}\n"
         f"--------------------------\n"
-        f"📊 **Monitor Ticker (QQQ):** {qqq_price:.2f}\n"
-        f"⚡ **Leveraged Ticker (TQQQ):** {tqqq_price:.2f}\n"
-        f"📈 **Trend Line (200-Day SMA):** {current_sma:.2f}\n"
-        f"💡 **Current Market Status:** **{trend}**\n"
+        f"📊 **Monitor Ticker ({monitor_ticker}):** {stats['qqq_price']:.2f}\n"
+        f"⚡ **Leveraged Ticker ({leveraged_ticker}):** {stats['tqqq_price']:.2f}\n"
+        f"📈 **Trend Line (200-Day SMA):** {stats.get('current_sma', 0.0):.2f}\n"
+        f"💡 **Current Market Status:** **{stats.get('trend', 'N/A')}**\n"
         f"--------------------------\n"
         f"💰 **Asset Allocation Status:**\n"
         f"• Offensive Positions (TQQQ/QQQ): Adjust based on signal\n"
         f"• Defensive Positions (SGOV): Suggested Hold (for hedging)\n"
         f"--------------------------\n"
-        f"🚩 **Execution Action:** {action}"
+        f"🚩 **Execution Action:** {stats['action']}"
     )
+    
+    return message
+
+def run_bot():
+    webhook_url = os.environ.get("DISCORD_WEBHOOK")
+
+    strat = SMATrendFollowing(sma_window=200)
+    message = generate_market_report(strat)
     
     # Send to Discord
     if webhook_url:

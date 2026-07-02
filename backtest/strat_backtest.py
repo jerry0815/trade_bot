@@ -16,78 +16,97 @@ def get_cached_data(ticker="^NDX"):
         DATA_CACHE[ticker] = df
     return DATA_CACHE[ticker].copy()
 
+def prep_base_indicators(df, vix_series, sma_window=200):
+    """Applies VIX alignment, base indicators, ATR, and Borrow Rates to a dataframe."""
+
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+
+    df = df.copy()
+
+    # Align VIX
+    df['VIX'] = vix_series
+    df['VIX'] = df['VIX'].ffill()
+
+    # 1. Base Indicators
+    df['SMA'] = df['Close'].rolling(window=sma_window).mean()
+    df['Daily_Return_1x'] = df['Close'].pct_change()
+
+    # 2. Vectorized True Range
+    df['Prev_Close'] = df['Close'].shift(1)
+    df['HL'] = df['High'] - df['Low']
+    df['HC'] = (df['High'] - df['Prev_Close']).abs()
+    df['LC'] = (df['Low'] - df['Prev_Close']).abs()
+    df['True_Range'] = df[['HL', 'HC', 'LC']].max(axis=1)
+    df.loc[df['Prev_Close'].isna(), 'True_Range'] = df['HL']
+
+    df['ATR'] = df['True_Range'].rolling(window=14).mean()
+
+    # 3. Pre-compute Historic Borrow Rates
+    years = df.index.year
+    conditions = [
+        years < 1990, years < 2000, years < 2008,
+        years < 2016, years < 2022, years >= 2022
+    ]
+    choices = [0.09, 0.055, 0.04, 0.005, 0.015, 0.05]
+    df['BR'] = np.select(conditions, choices, default=0.05)
+
+    return df
+
 def get_cached_signals(ticker="^NDX", sma_window=200):
     """Calculates all indicators and borrow rates for the entire history once."""
     cache_key = (ticker, sma_window)
 
     if cache_key not in SIGNAL_CACHE:
         df = get_cached_data(ticker)
-
         vix_df = get_cached_data("^VIX")
-        # Pandas automatically aligns the dates when assigning
-        df['VIX'] = vix_df['Close']
-        # Forward fill any missing days (e.g., mismatched market holidays)
-        df['VIX'] = df['VIX'].ffill()
 
-        # 1. Base Indicators
-        df['SMA'] = df['Close'].rolling(window=sma_window).mean()
-        df['Daily_Return_1x'] = df['Close'].pct_change()
-
-        # 2. Vectorized True Range (Produces the exact same results as your lambda, but instantly)
-        df['Prev_Close'] = df['Close'].shift(1)
-        df['HL'] = df['High'] - df['Low']
-        df['HC'] = (df['High'] - df['Prev_Close']).abs()
-        df['LC'] = (df['Low'] - df['Prev_Close']).abs()
-        df['True_Range'] = df[['HL', 'HC', 'LC']].max(axis=1)
-        df.loc[df['Prev_Close'].isna(), 'True_Range'] = df['HL'] # First row fallback
-
-        df['ATR'] = df['True_Range'].rolling(window=14).mean()
-
-        # 3. Pre-compute Historic Borrow Rates
-        years = df.index.year
-        conditions = [
-            years < 1990, years < 2000, years < 2008,
-            years < 2016, years < 2022, years >= 2022
-        ]
-        choices = [0.09, 0.055, 0.04, 0.005, 0.015, 0.05]
-        df['BR'] = np.select(conditions, choices, default=0.05)
-
-        SIGNAL_CACHE[cache_key] = df
+        # Use our new shared helper function
+        SIGNAL_CACHE[cache_key] = prep_base_indicators(df, vix_df['Close'], sma_window)
 
     return SIGNAL_CACHE[cache_key].copy()
 
 class BaseStrategy:
     def __init__(self, name):
         self.name = name
-        self.required_sma_window = 200
+        self.df = None
 
     def generate_signals(self, df):
-        """The main pipeline: runs child logic, then calculates universal stats."""
-        # 1. Ask the child class to apply its specific 'in_market' logic
         df = self._add_indicator_logic(df)
-
-        # Ensure the child actually created the required column
         if 'in_market' not in df.columns:
             raise ValueError(f"Strategy '{self.name}' failed to create 'in_market' column.")
 
-        # 2. Calculate the universal statistics automatically
         entries = (df['in_market'] == True) & (df['in_market'].shift(1) == False)
         exits = (df['in_market'] == False) & (df['in_market'].shift(1) == True)
 
         strat_stats = {
             "total_trades": int(entries.sum()),
-            "cash_log": df[exits].index.tolist()
         }
-
-        # 3. Return exactly what the Backtester expects
         return df, strat_stats
 
     def _add_indicator_logic(self, df):
-        """
-        To be overridden by child classes.
-        Must take a DataFrame, add an 'in_market' boolean column, and return the DataFrame.
-        """
         raise NotImplementedError("Child strategies must implement _add_indicator_logic()")
+
+    def get_live_stats(self, monitor_ticker="QQQ", leveraged_ticker="TQQQ"):
+        # 1. Fetch data
+        df = yf.download(monitor_ticker, period="5y", progress=False, auto_adjust=False)
+        tqqq = yf.download(leveraged_ticker, period="5y", progress=False, auto_adjust=False)
+        vix = yf.download("^VIX", period="5y", progress=False, auto_adjust=False)
+        
+        for data in [df, tqqq, vix]:
+            if isinstance(data.columns, pd.MultiIndex):
+                data.columns = data.columns.get_level_values(0)
+
+        # 2. Process data
+        self.df = prep_base_indicators(df, vix['Close'])
+        self.df = self._add_indicator_logic(self.df)
+        
+        # 3. Return the base report stats
+        return {
+            "qqq_price": float(self.df['Close'].iloc[-1].item()),
+            "tqqq_price": float(tqqq['Close'].iloc[-1]),
+            "action": "BUY/HOLD" if bool(self.df['in_market'].iloc[-1]) else "SELL/CASH"
+        }
 
 class BuyAndHold(BaseStrategy):
     def __init__(self):
@@ -103,41 +122,84 @@ class SMATrendFollowing(BaseStrategy):
         # We handle naming and initialization cleanly
         name = f"SMA {sma_window} - " + (f"Static {buffer_pct*100}% Buffer" if buffer_pct else f"ATR Buffer (x{atr_multiplier})")
         super().__init__(name=name)
+        self.sma_window = sma_window
         self.buffer_pct = buffer_pct
         self.atr_multiplier = atr_multiplier
+
+    def get_live_stats(self, monitor_ticker="QQQ", leveraged_ticker="TQQQ"):
+        # 1. Get the base data
+        stats = super().get_live_stats(monitor_ticker, leveraged_ticker)
+        
+        # 2. Extract values as scalars
+        price = float(self.df['Close'].iloc[-1])
+        sma = float(self.df['SMA'].iloc[-1])
+        
+        # 3. Calculate dynamic bands based on your existing logic
+        # (This assumes you have ATR in your df, or a fixed buffer_pct)
+        if self.buffer_pct:
+            upper_bound = sma * (1 + self.buffer_pct)
+            lower_bound = sma * (1 - self.buffer_pct)
+        else:
+            upper_bound = sma + (float(self.df['ATR'].iloc[-1]) * self.atr_multiplier)
+            lower_bound = sma - (float(self.df['ATR'].iloc[-1]) * self.atr_multiplier)
+            
+        # 4. Determine trend
+        if price > upper_bound:
+            trend = "BULLISH"
+        elif price < lower_bound:
+            trend = "BEARISH"
+        else:
+            trend = "NEUTRAL" # Price is within the bands
+        
+        stats.update({
+            "current_sma": sma,
+            "trend": trend
+        })
+        
+        return stats
 
     def _add_indicator_logic(self, df):
         """
         Overrides the hidden parent logic. Focuses strictly on creating the
-        'in_market' column using your specialized buffer-band logic.
+        'in_market' column using specialized buffer-band logic.
+        Vectorized for performance.
         """
         df = df.copy()
-        in_market_col = []
 
-        # Day 1 initial setup bounds
-        init_price = float(df.iloc[0]['Close'])
-        init_sma = float(df.iloc[0]['SMA'])
-        init_atr = float(df.iloc[0]['ATR'])
+        # df['SMA'] = df['Close'].rolling(window=self.sma_window).mean()
+        # 1. Calculate bounds universally for the entire dataframe at once
+        if self.buffer_pct:
+            upper_bound = df['SMA'] * (1 + self.buffer_pct)
+            lower_bound = df['SMA'] * (1 - self.buffer_pct)
+        else:
+            upper_bound = df['SMA'] + (df['ATR'] * self.atr_multiplier)
+            lower_bound = df['SMA'] - (df['ATR'] * self.atr_multiplier)
 
-        lower_bound = init_sma * (1 - self.buffer_pct) if self.buffer_pct else init_sma - (init_atr * self.atr_multiplier)
-        in_market = False if init_price < lower_bound else True
+        # 2. Identify the exact days the price breaks the bounds
+        buy_signal = df['Close'] > upper_bound
+        sell_signal = df['Close'] < lower_bound
 
-        # Stateful loop to calculate the trailing buffer transitions
-        for row in df.itertuples():
-            idx_price, sma, atr = float(row.Close), float(row.SMA), float(row.ATR)
+        # # --- THE 3-DAY CONFIRMATION RULE ---
+        # buy_signal = buy_signal.rolling(window=3).min() == 1
+        # sell_signal = sell_signal.rolling(window=3).min() == 1
 
-            upper_bound = sma * (1 + self.buffer_pct) if self.buffer_pct else sma + (atr * self.atr_multiplier)
-            lower_bound = sma * (1 - self.buffer_pct) if self.buffer_pct else sma - (atr * self.atr_multiplier)
+        # 3. Create a state tracker using np.nan (float) to avoid object dtype warnings
+        state = pd.Series(np.nan, index=df.index)
 
-            if not in_market and idx_price > upper_bound:
-                in_market = True
-            elif in_market and idx_price < lower_bound:
-                in_market = False
+        # 4. Map our signals to 1.0 (True) and 0.0 (False)
+        state.loc[buy_signal] = 1.0
+        state.loc[sell_signal] = 0.0
 
-            in_market_col.append(in_market)
+        # 5. Calculate initial state as a 1.0 or 0.0
+        initial_state_bool = df['Close'].iloc[0] >= lower_bound.iloc[0]
+        initial_state_val = 1.0 if initial_state_bool else 0.0
 
-        raw_signal = pd.Series(in_market_col, index=df.index)
-        df['in_market'] = raw_signal.shift(1) == True
+        # 6. Forward fill the numeric state
+        raw_signal = state.ffill().fillna(initial_state_val)
+
+        # 7. Shift the signal by 1 day and strictly cast to bool
+        df['in_market'] = raw_signal.shift(1).fillna(initial_state_val).astype(bool)
+
         return df
 
 class VolatilityFilter(BaseStrategy):
@@ -180,6 +242,11 @@ class RSIMeanReversion(BaseStrategy):
         self.buy_thresh = buy_thresh
         self.sell_thresh = sell_thresh
 
+    def get_report_fields(self, df):
+        fields = super().get_report_fields(df)
+        fields["RSI Value"] = f"{df['RSI'].iloc[-1]:.2f}"
+        return fields
+
     def _add_indicator_logic(self, df):
         df = df.copy()
 
@@ -199,6 +266,7 @@ class RSIMeanReversion(BaseStrategy):
         df['in_market'] = raw_signal.shift(1) == True
         return df
 
+
 class Backtester:
     """The simulation engine handling money, drawdowns, and data ingestion."""
     def __init__(self, base_ticker="^NDX", start_date="1999-01-01", period_years=25,
@@ -213,19 +281,21 @@ class Backtester:
         self.annual_dca = annual_dca
         self.verbose = verbose
 
-    def _get_data(self, sma_window):
+    def _get_data(self):
         # Assumes get_cached_signals exists in your global scope
-        df = get_cached_signals(self.base_ticker, sma_window)
+        df = get_cached_signals(self.base_ticker)
         df = df[(df.index >= self.start_dt) & (df.index <= self.end_dt)]
         return df
 
     def run(self, strategy):
         """Executes the provided strategy and returns the results."""
-        df = self._get_data(strategy.required_sma_window)
-        if df.empty: return None
+        df = get_cached_signals(self.base_ticker)
 
-        # 1. Ask the strategy to label the data
+        # 1. Ask the strategy to label the data on the FULL dataset
         df, strat_stats = strategy.generate_signals(df)
+
+        # 2. Slice the dataframe for the test period AFTER signals are generated
+        df = df[(df.index >= self.start_dt) & (df.index <= self.end_dt)]
 
         # 2. Run the math engine
         results = self._run_portfolio_math(df)
@@ -351,8 +421,6 @@ class RollingBacktester:
         Returns a formatted DataFrame comparing them.
         """
         results_list = []
-        # metric_key = "total_roi" if self.annual_dca > 0 else "strategy_twr"
-        # metric_label = "Total ROI" if self.annual_dca > 0 else "CAGR"
         metric_key = "strategy_twr"
         metric_label = "TWR"
 
@@ -385,11 +453,14 @@ class RollingBacktester:
                 # Dynamically use the strategy's name for the column headers
                 row_data[f"{strat.name} {metric_label} (%)"] = res[metric_key]
                 row_data[f"{strat.name} Max DD (%)"] = res["max_drawdown"]
+                # RECORD TOTAL TRADES HERE
+                row_data[f"{strat.name} Total Trades"] = res.get("total_trades", 0)
 
             if valid_run:
                 results_list.append(row_data)
 
         return pd.DataFrame(results_list)
+
 
 def run_experiment_suite(
     configs,
@@ -428,10 +499,7 @@ def run_experiment_suite(
 
     # 2. Summary Printing
     if print_summary:
-        # Update this label to match your DataFrame's column name
-        # metric_label = "Total ROI" if annual_dca > 0 else "CAGR"
         metric_label = "TWR"
-
         print(f"\n{'='*75}\n📊 SUMMARY STATISTICS ({metric_label} & Drawdowns)\n{'='*75}")
 
         for config_name, df_res in all_rolling_results.items():
@@ -441,13 +509,17 @@ def run_experiment_suite(
 
             print(f"--- {config_name} ---")
             for strat in strategies:
-                # This must match exactly how your DataFrame columns are named, e.g., "Buy & Hold TWR (%)"
+                # Define column headers dynamically
                 ret_col = f"{strat.name} {metric_label} (%)"
                 dd_col = f"{strat.name} Max DD (%)"
+                trades_col = f"{strat.name} Total Trades"
 
                 if ret_col in df_res.columns and dd_col in df_res.columns:
                     avg_val = df_res[ret_col].mean()
                     med_val = df_res[ret_col].median()
+
+                    # Calculate average trades per period
+                    avg_trades = df_res[trades_col].mean() if trades_col in df_res.columns else 0
 
                     worst_ret_idx = df_res[ret_col].idxmin()
                     worst_dd_idx = df_res[dd_col].idxmin()
@@ -459,9 +531,9 @@ def run_experiment_suite(
                     worst_dd_date = str(df_res.loc[worst_dd_idx, 'Start Date'])[:10]
 
                     print(f"[{strat.name}]")
-                    # Updated the spacing here slightly so "TWR" aligns nicely
                     print(f"  {metric_label:<9} -> Avg: {avg_val:>8.2f}% | Med: {med_val:>8.2f}%")
-                    print(f"              Worst: {worst_val:>8.2f}% (Started: {worst_ret_date})")
-                    print(f"  Max DD: {worst_dd:>8.2f}% (Started: {worst_dd_date})\n")
+                    print(f"               Worst: {worst_val:>8.2f}% (Started: {worst_ret_date})")
+                    print(f"  Max DD:   {worst_dd:>8.2f}% (Started: {worst_dd_date})")
+                    print(f"  Trades:   Avg {avg_trades:.1f} per period\n")
 
     return all_rolling_results
