@@ -11,7 +11,7 @@ The system acts as a disciplined guardrail for your investment:
 * **Bearish Signal:** The system triggers a defensive alert, suggesting a move to cash or short-term treasury bills (e.g., SGOV/BIL) to avoid catastrophic drawdown risks.
 * **Disciplined Execution:** By automating the calculation daily, it removes emotional bias and ensures strict adherence to the moving average discipline.
 
-### Table 1: Lump Sum Performance
+### Table 1: NASQ100 Lump Sum Performance
 *Backtest Parameters: 26-year rolling periods starting from 1980-01-15.*
 *Initial Investment: $10,000*
 
@@ -34,6 +34,29 @@ The system acts as a disciplined guardrail for your investment:
 | **1x** | **EMA 50/200** | 13.23% | **13.53%** | **9.29%** | -39.94% | 23.0 |
 | **1x** | **VIX < 25** | 5.23% | 5.54% | 1.59% | -83.44% | 169.0 |
 | **1x** | **RSI 30/70** | 4.60% | 4.52% | 2.30% | -72.05% | 36.0 |
+
+### Table 2: SP500 Lump Sum Performance
+*Calculation: Annualized Return / Annualized Volatility (Sharpe Ratio approximation)*
+
+| Leverage | Strategy | Avg TWR | Med TWR | Worst TWR | Max DD | Avg Trades |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **3x** | **Buy & Hold** | 2.75% | 3.33% | -3.73% | -98.86% | 0.0 |
+| **3x** | **SMA 200 (ATR x2.5)** | **13.25%** | **13.16%** | **9.68%** | **-58.57%** | 19.0 |
+| **3x** | **VIX < 25** | 0.63% | 0.72% | -3.31% | -95.27% | 169.0 |
+| **3x** | **EMA 50/200** | 11.24% | 10.89% | 6.93% | -79.37% | 20.0 |
+| **3x** | **RSI 30/70** | 3.81% | 4.42% | -2.01% | -95.08% | 38.0 |
+| | | | | | | |
+| **2x** | **Buy & Hold** | 6.42% | 6.63% | 2.41% | -91.49% | 0.0 |
+| **2x** | **SMA 200 (ATR x2.5)** | **11.26%** | **11.27%** | 9.13% | **-43.04%** | 19.0 |
+| **2x** | **VIX < 25** | 2.69% | 2.77% | -0.20% | -82.88% | 169.0 |
+| **2x** | **EMA 50/200** | 10.39% | 10.42% | **10.39%** | -59.38% | 20.0 |
+| **2x** | **RSI 30/70** | 5.94% | 6.00% | 2.40% | -81.45% | 38.0 |
+| | | | | | | |
+| **1x** | **Buy & Hold** | 7.18% | 7.24% | 5.33% | -56.90% | 0.0 |
+| **1x** | **SMA 200 (ATR x2.5)** | **8.34%** | **8.48%** | 6.75% | **-23.55%** | 19.0 |
+| **1x** | **VIX < 25** | 4.00% | 4.12% | 2.08% | -46.75% | 169.0 |
+| **1x** | **EMA 50/200** | 8.13% | 8.36% | **9.29%** | -33.26% | 20.0 |
+| **1x** | **RSI 30/70** | 5.88% | 5.87% | 4.68% | -52.65% | 38.0 |
 
 
 ---
