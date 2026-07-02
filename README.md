@@ -5,13 +5,33 @@ This project is an automated trading monitor system designed for long-term inves
 
 ---
 
-### **Strategy Logic**
-The system acts as a disciplined guardrail for your investment:
-* **Bullish Signal:** The system suggests maintaining long positions in QQQ/TQQQ to capture leveraged market growth.
-* **Bearish Signal:** The system triggers a defensive alert, suggesting a move to cash or short-term treasury bills (e.g., SGOV/BIL) to avoid catastrophic drawdown risks.
-* **Disciplined Execution:** By automating the calculation daily, it removes emotional bias and ensures strict adherence to the moving average discipline.
+### Strategy Logic: Dynamic ATR Protection
 
-### Table 1: NASQ100 Lump Sum Performance
+The system provides a clear, rule-based approach to market exposure. We move beyond simple "price crossing SMA" signals by adding a dynamic volatility buffer using the **Average True Range (ATR)**.
+
+**The Decision Rules:**
+
+*   **Bullish:** When the price rises **above** the upper buffer:
+    `Price > (SMA200 + 2.5 * ATR)`
+    *Action: Enter or maintain long positions to capture growth.*
+
+*   **Bearish:** When the price falls **below** the lower buffer:
+    `Price < (SMA200 - 2.5 * ATR)`
+    *Action: Exit to cash or short-term Treasuries (e.g., SGOV/BIL) to protect capital.*
+
+*   **Neutral:** When the price is **inside** the buffer:
+    `(SMA200 - 2.5 * ATR) <= Price <= (SMA200 + 2.5 * ATR)`
+    *Action: Hold existing position. This prevents "whipsawing" during indecisive market periods.*
+
+### Key Components
+
+*   **The Trend Anchor (SMA 200):** We utilize the 200-day Simple Moving Average as our "North Star" to filter out market noise and focus on the primary long-term trend.
+*   **The Volatility Shield (ATR):** By applying a 2.5x ATR multiplier, we create a "breathing room" buffer that expands during volatile markets and tightens during calm ones, ensuring the strategy adapts to current market conditions.
+*   **Disciplined Execution:** By automating these calculations, the system removes emotional bias and ensures strict, math-based adherence to your risk parameters.
+
+---
+
+### Table 1: NASDQ100 Lump Sum Performance
 *Backtest Parameters: 26-year rolling periods starting from 1980-01-15.*
 *Initial Investment: $10,000*
 
@@ -62,7 +82,6 @@ This bot implements a **Trend-Following Strategy** enhanced with a **Triple-Filt
 2. **The Triple-Filter Mechanism:**
     * **SMA 200:** Identifies the long-term regime (Bull vs. Bear).
     * **ATR (Average True Range) Filter:** Dynamically adjusts the "No-Trade Zone" based on current market volatility, preventing the bot from overreacting to minor noise in stable markets.
-    * **Time-Confirmation:** Requires a **3-day consecutive close** beyond the ATR-adjusted channel to confirm trend reversals, significantly reducing false positives.
 3. **Core Objective:** To improve **Risk-Adjusted Returns (Sharpe Ratio)** by preserving capital during systemic failures rather than attempting to time minor market tops.
 
 ---
