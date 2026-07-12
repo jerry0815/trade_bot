@@ -13,31 +13,12 @@ def generate_market_report(strategy, monitor_ticker="QQQ", leveraged_ticker="TQQ
     Fetches strategy stats and formats them into your report template.
     """
 
-    state_file = "last_signal.txt"
-    flag_file = "signal_changed.txt"
-    
     # Get the stats dictionary from the strategy for both indices
     stats_ndx = strategy.get_live_stats(monitor_ticker, leveraged_ticker)
     stats_sp500 = strategy.get_live_stats(sp500_ticker, sp500_ticker) # Use SPY for both to avoid extra fetching
     
-    # We use the S&P 500 trend as the primary signal based on our cross-signal experiment
-    primary_trend = stats_sp500["trend"]
-    secondary_trend = stats_ndx["trend"]
-
-    last_signal = ""
-    if os.path.exists(state_file):
-        with open(state_file, "r") as f:
-            last_signal = f.read().strip()
-            
-    # Combine trends to track changes in either signal
-    current_signal_state = f"{primary_trend}_{secondary_trend}"
-    signal_changed = (current_signal_state != last_signal)
-    
-    if signal_changed:
-        with open(flag_file, "w") as f:
-            f.write("true")
-        with open(state_file, "w") as f:
-            f.write(current_signal_state)
+    # Check if either signal changed from yesterday
+    signal_changed = stats_sp500["trend_changed"] or stats_ndx["trend_changed"]
     
     change_alert = "🔄 **Signal Change Detected!**" if signal_changed else "✅ Status: No change in signal."
 

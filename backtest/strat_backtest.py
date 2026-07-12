@@ -181,30 +181,32 @@ class SMATrendFollowing(BaseStrategy):
         # 1. Get the base data
         stats = super().get_live_stats(monitor_ticker, leveraged_ticker)
         
-        # 2. Extract values as scalars
-        price = float(self.df['Close'].iloc[-1])
-        sma = float(self.df['SMA'].iloc[-1])
-        
-        # 3. Calculate dynamic bands based on your existing logic
-        # (This assumes you have ATR in your df, or a fixed buffer_pct)
-        if self.buffer_pct:
-            upper_bound = sma * (1 + self.buffer_pct)
-            lower_bound = sma * (1 - self.buffer_pct)
-        else:
-            upper_bound = sma + (float(self.df['ATR'].iloc[-1]) * self.atr_multiplier)
-            lower_bound = sma - (float(self.df['ATR'].iloc[-1]) * self.atr_multiplier)
+        def _get_trend_for_day(idx):
+            price = float(self.df['Close'].iloc[idx])
+            sma = float(self.df['SMA'].iloc[idx])
             
-        # 4. Determine trend
-        if price > upper_bound:
-            trend = "BULLISH"
-        elif price < lower_bound:
-            trend = "BEARISH"
-        else:
-            trend = "NEUTRAL" # Price is within the bands
+            if self.buffer_pct:
+                upper_bound = sma * (1 + self.buffer_pct)
+                lower_bound = sma * (1 - self.buffer_pct)
+            else:
+                atr = float(self.df['ATR'].iloc[idx])
+                upper_bound = sma + (atr * self.atr_multiplier)
+                lower_bound = sma - (atr * self.atr_multiplier)
+                
+            if price > upper_bound:
+                return "BULLISH", sma
+            elif price < lower_bound:
+                return "BEARISH", sma
+            return "NEUTRAL", sma
+
+        current_trend, current_sma = _get_trend_for_day(-1)
+        previous_trend, _ = _get_trend_for_day(-2)
         
         stats.update({
-            "current_sma": sma,
-            "trend": trend
+            "current_sma": current_sma,
+            "trend": current_trend,
+            "previous_trend": previous_trend,
+            "trend_changed": current_trend != previous_trend
         })
         
         return stats
