@@ -114,20 +114,25 @@ class BaseStrategy:
         raise NotImplementedError("Child strategies must implement _add_indicator_logic()")
 
     def get_live_stats(self, monitor_ticker="QQQ", leveraged_ticker="TQQQ"):
-        # 1. Fetch all 3 tickers concurrently (~3x faster than sequential downloads)
-        def _dl(ticker):
-            data = yf.download(ticker, period="5y", progress=False, auto_adjust=False)
-            if isinstance(data.columns, pd.MultiIndex):
-                data.columns = data.columns.get_level_values(0)
-            return data
-
-        with ThreadPoolExecutor(max_workers=3) as pool:
-            f_mon  = pool.submit(_dl, monitor_ticker)
-            f_lev  = pool.submit(_dl, leveraged_ticker)
-            f_vix  = pool.submit(_dl, "^VIX")
-            df     = f_mon.result()
-            tqqq   = f_lev.result()
-            vix    = f_vix.result()
+        # 1. Fetch all 3 tickers safely using native yf.download
+        # yfinance handles multi-ticker downloads much better natively and is thread-safe
+        tickers = f"{monitor_ticker} {leveraged_ticker} ^VIX"
+        data = yf.download(tickers, period="5y", progress=False, auto_adjust=False)
+        
+        # If multiple tickers were requested, yfinance returns a MultiIndex DataFrame (Price, Ticker)
+        # We need to extract the 'Close', 'High', 'Low' etc. for each ticker
+        if isinstance(data.columns, pd.MultiIndex):
+            # df is for monitor_ticker
+            df = data.xs(monitor_ticker, axis=1, level=1).dropna(subset=['Close']).copy()
+            # tqqq is for leveraged_ticker
+            tqqq = data.xs(leveraged_ticker, axis=1, level=1).dropna(subset=['Close']).copy()
+            # vix is for ^VIX
+            vix = data.xs("^VIX", axis=1, level=1).dropna(subset=['Close']).copy()
+        else:
+            # Fallback if only one ticker was somehow fetched
+            df = data.dropna(subset=['Close']).copy()
+            tqqq = data.dropna(subset=['Close']).copy()
+            vix = data.dropna(subset=['Close']).copy()
 
         # 2. Process data
         self.df = prep_base_indicators(df, vix['Close'])
