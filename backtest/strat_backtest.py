@@ -1,6 +1,16 @@
 import yfinance as yf
 import pandas as pd
 import numpy as np
+from concurrent.futures import ThreadPoolExecutor
+
+# ---------------------------------------------------------------------------
+# Capital Gains Tax Rates (US defaults)
+# Long-term: position held > 365 calendar days
+# Short-term: position held <= 365 calendar days
+# Set apply_tax=True on Backtester to enable post-tax simulation.
+# ---------------------------------------------------------------------------
+TAX_LONG_TERM_RATE  = 0.15   # 15% on gains held > 365 days
+TAX_SHORT_TERM_RATE = 0.25   # 25% on gains held <= 365 days
 
 # Global Caches
 DATA_CACHE = {}
@@ -51,6 +61,12 @@ def prep_base_indicators(df, vix_series, sma_window=200):
     choices = [0.09, 0.055, 0.04, 0.005, 0.015, 0.05]
     df['BR'] = np.select(conditions, choices, default=0.05)
 
+    # 4. Next-day open execution columns
+    # Open2Close: return earned when entering at today's open and holding to close
+    # Overnight_Return: gap return from prior close to today's open (used on exit day)
+    df['Open2Close']       = (df['Close'] - df['Open'])          / df['Open']
+    df['Overnight_Return'] = (df['Open']  - df['Close'].shift(1)) / df['Close'].shift(1)
+
     return df
 
 def get_cached_signals(ticker="^NDX", sma_window=200):
@@ -66,6 +82,21 @@ def get_cached_signals(ticker="^NDX", sma_window=200):
 
     return SIGNAL_CACHE[cache_key].copy()
 
+def cache_clear():
+    """
+    Clears all in-memory data and signal caches.
+
+    Call this whenever you change indicator parameters that are NOT part of the
+    cache key (e.g., ATR period in prep_base_indicators, borrow rate table),
+    or to force a fresh yfinance download after market close.
+
+    Example:
+        cache_clear()
+        get_cached_signals('^NDX', sma_window=200)  # re-downloads + recomputes
+    """
+    DATA_CACHE.clear()
+    SIGNAL_CACHE.clear()
+
 class BaseStrategy:
     def __init__(self, name):
         self.name = name
@@ -75,37 +106,52 @@ class BaseStrategy:
         df = self._add_indicator_logic(df)
         if 'in_market' not in df.columns:
             raise ValueError(f"Strategy '{self.name}' failed to create 'in_market' column.")
-
-        entries = (df['in_market'] == True) & (df['in_market'].shift(1) == False)
-        exits = (df['in_market'] == False) & (df['in_market'].shift(1) == True)
-
-        strat_stats = {
-            "total_trades": int(entries.sum()),
-        }
-        return df, strat_stats
+        # trade counts are derived from the sliced test-period df inside Backtester,
+        # not from the full history here — avoids the off-period double-count bug.
+        return df, {}
 
     def _add_indicator_logic(self, df):
         raise NotImplementedError("Child strategies must implement _add_indicator_logic()")
 
     def get_live_stats(self, monitor_ticker="QQQ", leveraged_ticker="TQQQ"):
-        # 1. Fetch data
-        df = yf.download(monitor_ticker, period="5y", progress=False, auto_adjust=False)
-        tqqq = yf.download(leveraged_ticker, period="5y", progress=False, auto_adjust=False)
-        vix = yf.download("^VIX", period="5y", progress=False, auto_adjust=False)
-        
-        for data in [df, tqqq, vix]:
+        # 1. Fetch all 3 tickers concurrently (~3x faster than sequential downloads)
+        def _dl(ticker):
+            data = yf.download(ticker, period="5y", progress=False, auto_adjust=False)
             if isinstance(data.columns, pd.MultiIndex):
                 data.columns = data.columns.get_level_values(0)
+            return data
+
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            f_mon  = pool.submit(_dl, monitor_ticker)
+            f_lev  = pool.submit(_dl, leveraged_ticker)
+            f_vix  = pool.submit(_dl, "^VIX")
+            df     = f_mon.result()
+            tqqq   = f_lev.result()
+            vix    = f_vix.result()
 
         # 2. Process data
         self.df = prep_base_indicators(df, vix['Close'])
         self.df = self._add_indicator_logic(self.df)
-        
-        # 3. Return the base report stats
+
+        # 3. Count consecutive trading days in the current state (hold or cash streak)
+        in_market_vals = self.df['in_market'].values
+        current_state  = bool(in_market_vals[-1])
+        streak = 0
+        for v in reversed(in_market_vals):
+            if bool(v) == current_state:
+                streak += 1
+            else:
+                break
+        # Derive the calendar date the current streak started
+        state_since = self.df.index[-streak] if streak <= len(self.df) else self.df.index[0]
+
+        # 4. Return the base report stats
         return {
-            "qqq_price": float(self.df['Close'].iloc[-1].item()),
-            "tqqq_price": float(tqqq['Close'].iloc[-1]),
-            "action": "BUY/HOLD" if bool(self.df['in_market'].iloc[-1]) else "SELL/CASH"
+            "qqq_price"            : float(self.df['Close'].iloc[-1].item()),
+            "tqqq_price"           : float(tqqq['Close'].iloc[-1]),
+            "action"               : "BUY/HOLD" if current_state else "SELL/CASH",
+            "days_in_current_state": int(streak),
+            "state_since"          : state_since.strftime("%Y-%m-%d"),
         }
 
 class BuyAndHold(BaseStrategy):
@@ -166,7 +212,9 @@ class SMATrendFollowing(BaseStrategy):
         """
         df = df.copy()
 
-        # df['SMA'] = df['Close'].rolling(window=self.sma_window).mean()
+        # Always recompute SMA for this strategy's own window.
+        # The cached df has SMA=200; if sma_window differs this would silently use the wrong line.
+        df['SMA'] = df['Close'].rolling(window=self.sma_window).mean()
         # 1. Calculate bounds universally for the entire dataframe at once
         if self.buffer_pct:
             upper_bound = df['SMA'] * (1 + self.buffer_pct)
@@ -213,9 +261,10 @@ class VolatilityFilter(BaseStrategy):
         # 1. Generate the signal based on today's closing VIX
         raw_signal = df['VIX'] < self.vix_threshold
 
-        # 2. Shift the signal by 1 day!
-        # Today's VIX determines tomorrow's market exposure.
-        df['in_market'] = raw_signal.shift(1) == True
+        # 2. Shift by 1 day — today's VIX determines tomorrow's exposure.
+        #    fillna(False) ensures the first row doesn't flip in on stale NaN.
+        shifted = raw_signal.shift(1)
+        df['in_market'] = np.where(shifted.isna(), False, shifted).astype(bool)
 
         return df
 
@@ -232,7 +281,8 @@ class EMACrossover(BaseStrategy):
         slow_ema = df['Close'].ewm(span=self.slow, adjust=False).mean()
 
         raw_signal = fast_ema > slow_ema
-        df['in_market'] = raw_signal.shift(1) == True
+        shifted = raw_signal.shift(1)
+        df['in_market'] = np.where(shifted.isna(), False, shifted).astype(bool)
         return df
 
 class RSIMeanReversion(BaseStrategy):
@@ -242,10 +292,6 @@ class RSIMeanReversion(BaseStrategy):
         self.buy_thresh = buy_thresh
         self.sell_thresh = sell_thresh
 
-    def get_report_fields(self, df):
-        fields = super().get_report_fields(df)
-        fields["RSI Value"] = f"{df['RSI'].iloc[-1]:.2f}"
-        return fields
 
     def _add_indicator_logic(self, df):
         df = df.copy()
@@ -263,50 +309,63 @@ class RSIMeanReversion(BaseStrategy):
         df['signal'] = df['signal'].ffill().fillna(-1)
 
         raw_signal = df['signal'] == 1
-        df['in_market'] = raw_signal.shift(1) == True
+        shifted = raw_signal.shift(1)
+        df['in_market'] = np.where(shifted.isna(), False, shifted).astype(bool)
         return df
 
 
 class Backtester:
     """The simulation engine handling money, drawdowns, and data ingestion."""
     def __init__(self, base_ticker="^NDX", start_date="1999-01-01", period_years=25,
-                 leverage=3, expense_ratio=0.0095, initial_fund=10000, annual_dca=0, verbose=True):
-        self.base_ticker = base_ticker
-        self.start_dt = pd.to_datetime(start_date)
-        self.end_dt = self.start_dt + pd.DateOffset(years=period_years)
-        self.period_years = period_years
-        self.leverage = leverage
+                 leverage=3, expense_ratio=0.0095, initial_fund=10000, annual_dca=0,
+                 apply_tax=False, verbose=True, signal_ticker=None):
+        self.base_ticker   = base_ticker
+        # signal_ticker: ticker used to generate strategy signals (in_market).
+        # If None or same as base_ticker, standard single-ticker mode.
+        # If different (e.g. base="^NDX", signal="^GSPC"), the strategy reads
+        # ^GSPC price/indicators for signal generation but portfolio returns
+        # are computed from ^NDX daily moves — i.e. "trade TQQQ on SP500 signal".
+        self.signal_ticker = signal_ticker if signal_ticker else base_ticker
+        self.start_dt      = pd.to_datetime(start_date)
+        self.end_dt        = self.start_dt + pd.DateOffset(years=period_years)
+        self.period_years  = period_years
+        self.leverage      = leverage
         self.expense_ratio = expense_ratio
-        self.initial_fund = initial_fund
-        self.annual_dca = annual_dca
-        self.verbose = verbose
-
-    def _get_data(self):
-        # Assumes get_cached_signals exists in your global scope
-        df = get_cached_signals(self.base_ticker)
-        df = df[(df.index >= self.start_dt) & (df.index <= self.end_dt)]
-        return df
+        self.initial_fund  = initial_fund
+        self.annual_dca    = annual_dca
+        self.apply_tax     = apply_tax
+        self.verbose       = verbose
 
     def run(self, strategy):
         """Executes the provided strategy and returns the results."""
-        df = get_cached_signals(self.base_ticker)
-
-        # 1. Ask the strategy to label the data on the FULL dataset
+        # 1. Generate signals on the signal ticker (full history for warm-up)
+        df = get_cached_signals(self.signal_ticker)
         df, strat_stats = strategy.generate_signals(df)
 
-        # 2. Slice the dataframe for the test period AFTER signals are generated
-        df = df[(df.index >= self.start_dt) & (df.index <= self.end_dt)]
+        # 2. Cross-signal mode: overlay return columns from the tradeable ticker.
+        #    in_market stays from signal_ticker; Daily_Return_1x / Open2Close /
+        #    Overnight_Return are replaced with base_ticker's actual daily moves.
+        if self.signal_ticker != self.base_ticker:
+            df_ret = get_cached_signals(self.base_ticker)
+            for col in ['Daily_Return_1x', 'Open2Close', 'Overnight_Return']:
+                df[col] = df_ret[col]
+            # Drop dates where the return ticker has no data (e.g. different
+            # listing history between ^GSPC and ^NDX)
+            df = df.dropna(subset=['Daily_Return_1x'])
 
-        # 2. Run the math engine
+        # 3. Slice for the test period AFTER signals are generated on full history
+        df = df[(df.index >= self.start_dt) & (df.index <= self.end_dt)]
+        if df.empty:
+            return None
+
+        # 4. Run the math engine
         results = self._run_portfolio_math(df)
 
-        # 3. Calculate universal trade stats directly from the DataFrame
+        # 5. Calculate universal trade stats directly from the DataFrame
         trade_stats = self._calculate_trade_stats(df)
 
-        # 4. Combine and print (strip old cash_log if strategy still passes it)
+        # 6. Combine all results and print
         final_results = {**results, **trade_stats, **strat_stats, "strategy": strategy.name}
-        if "cash_log" in final_results:
-            del final_results["cash_log"]
 
         if self.verbose:
             self._print_results(final_results)
@@ -333,53 +392,141 @@ class Backtester:
         }
 
     def _run_portfolio_math(self, df):
-        """Core accounting math for TWR, leverage drag, and drawdowns."""
+        """
+        Core accounting math for TWR, leverage drag, and drawdowns.
+
+        Execution model (next-day open):
+        - ENTRY day  (in_market flips False→True): enters at today's open,
+          earns Open2Close return at leverage.
+        - HOLD days  (in_market stays True):  earns full close-to-close return.
+        - EXIT day   (in_market flips True→False): sells at today's open,
+          captures overnight gap at leverage; then tax is applied (if enabled).
+        - CASH days  (in_market stays False): earns money-market rate (BR×0.8).
+
+        Tax model (when apply_tax=True):
+        - On each exit, realised gain = portfolio_value_after_exit - cost_basis
+        - Hold duration determines rate: TAX_LONG_TERM_RATE (>365d) or
+          TAX_SHORT_TERM_RATE (<=365d).  Only positive gains are taxed.
+        - Tax drag is reflected in both final_value AND twr_index (after-tax TWR).
+
+        Performance: all daily returns are pre-vectorised into a NumPy array
+        before the loop. The scalar loop only handles state that depends on the
+        running portfolio value: DCA injections, tax deductions, drawdown.
+        """
+        # --- Pre-extract columns to NumPy (eliminates per-row attribute lookups) ---
+        n         = len(df)
+        dates     = df.index
+        in_mkt    = df['in_market'].values.astype(bool)
+        br_arr    = df['BR'].values.astype(float)
+        ret_arr   = np.nan_to_num(df['Daily_Return_1x'].values.astype(float))
+        o2c_arr   = np.nan_to_num(df['Open2Close'].values.astype(float))
+        ovn_arr   = np.nan_to_num(df['Overnight_Return'].values.astype(float))
+        years_arr = dates.year
+
+        # --- Vectorised transition masks ---
+        prev_mkt     = np.empty(n, dtype=bool)
+        prev_mkt[0]  = False
+        prev_mkt[1:] = in_mkt[:-1]
+        entering_mask = in_mkt  & ~prev_mkt   # False→True flip
+        exiting_mask  = ~in_mkt & prev_mkt    # True→False flip
+
+        # --- Pre-compute the full daily_return array in one vectorised pass ---
+        leverage_drag = (((self.leverage - 1) * br_arr) + self.expense_ratio) / 252
+        cash_ret      = (br_arr * 0.8) / 252
+
+        # Default: leveraged close-to-close when in market, cash when out
+        daily_ret_arr = np.where(in_mkt,
+                                 ret_arr * self.leverage - leverage_drag,
+                                 cash_ret)
+        # Entry days: only earn open→close (entered at open, missed overnight gap)
+        daily_ret_arr[entering_mask] = (o2c_arr[entering_mask] * self.leverage
+                                        - leverage_drag[entering_mask])
+        # Exit days: sell at open, capture only overnight gap at leverage
+        daily_ret_arr[exiting_mask]  = (ovn_arr[exiting_mask] * self.leverage
+                                        - leverage_drag[exiting_mask])
+
+        # --- Scalar loop: only handles running-value-dependent state ---
         portfolio_value = self.initial_fund
         total_principal = self.initial_fund
-        current_year = df.index[0].year
+        current_year    = int(years_arr[0])
+        peak_value      = self.initial_fund
+        min_value       = self.initial_fund
+        max_drawdown    = 0.0
+        twr_index       = 1.0
 
-        peak_value, min_value = self.initial_fund, self.initial_fund
-        max_drawdown, twr_index = 0.0, 1.0
+        total_tax_paid = 0.0
+        trade_log      = []
+        entry_idx      = -1       # array index of last entry (-1 = no open position)
+        cost_basis_val = 0.0
 
-        for row in df.itertuples():
-            daily_ret_1x, br = float(row.Daily_Return_1x), float(row.BR)
-            if pd.isna(daily_ret_1x): continue
+        for i in range(n):
+            # Capture cost basis BEFORE applying today's return (entry day only)
+            if entering_mask[i]:
+                entry_idx      = i
+                cost_basis_val = portfolio_value
 
-            # Evaluate return based on strategy signal
-            if row.in_market:
-                daily_drag = (((self.leverage - 1) * br) + self.expense_ratio) / 252
-                daily_return = (daily_ret_1x * self.leverage) - daily_drag
-            else:
-                daily_return = (br * 0.8) / 252
+            # Apply pre-computed return (fast: array read + multiply, no branches)
+            dr              = daily_ret_arr[i]
+            portfolio_value *= (1 + dr)
+            twr_index       *= (1 + dr)
 
-            portfolio_value *= (1 + daily_return)
-            twr_index *= (1 + daily_return)
+            # Tax + trade log on exit (fires ~once per trade, not every row)
+            if exiting_mask[i] and entry_idx >= 0:
+                hold_days     = (dates[i] - dates[entry_idx]).days
+                gross_ret_pct = (portfolio_value - cost_basis_val) / cost_basis_val * 100
+                trade_record  = {
+                    "entry_date"    : dates[entry_idx],
+                    "exit_date"     : dates[i],
+                    "hold_days"     : hold_days,
+                    "gross_ret_pct" : gross_ret_pct,
+                    "tax_paid"      : 0.0,
+                    "tax_type"      : "",
+                }
+                if self.apply_tax:
+                    gain = portfolio_value - cost_basis_val
+                    if gain > 0:
+                        rate     = TAX_LONG_TERM_RATE if hold_days > 365 else TAX_SHORT_TERM_RATE
+                        tax      = gain * rate
+                        total_tax_paid  += tax
+                        portfolio_value -= tax
+                        twr_index       *= portfolio_value / (portfolio_value + tax)
+                        trade_record["tax_paid"] = tax
+                        trade_record["tax_type"] = "Long-term" if hold_days > 365 else "Short-term"
+                trade_log.append(trade_record)
+                entry_idx = -1
 
-            # DCA Logic
-            if self.annual_dca > 0 and row.Index.year > current_year:
-                current_year = row.Index.year
+            # DCA: inject cash once per year (fires ~once per year, not every row)
+            if self.annual_dca > 0 and years_arr[i] > current_year:
+                current_year    = int(years_arr[i])
                 total_principal += self.annual_dca
                 portfolio_value += self.annual_dca
 
-            # Drawdowns
+            # Drawdown tracking
             if portfolio_value > peak_value: peak_value = portfolio_value
-            if portfolio_value < min_value: min_value = portfolio_value
-
+            if portfolio_value < min_value:  min_value  = portfolio_value
             drawdown = (portfolio_value - peak_value) / peak_value
             if drawdown < max_drawdown: max_drawdown = drawdown
 
-        return {
-            "final_value": portfolio_value,
-            "total_invested": total_principal,
-            "max_drawdown": max_drawdown * 100,
-            "strategy_twr": ((twr_index ** (1 / self.period_years)) - 1) * 100,
-            "total_roi": ((portfolio_value - total_principal) / total_principal) * 100,
-            "min_value": min_value
+        result = {
+            "final_value"    : portfolio_value,
+            "total_invested" : total_principal,
+            "max_drawdown"   : max_drawdown * 100,
+            # Use actual trading days for annualisation — more accurate than
+            # configured period_years when data has gaps or partial years.
+            "strategy_twr"   : ((twr_index ** (252 / len(df))) - 1) * 100,
+            "total_roi"      : ((portfolio_value - total_principal) / total_principal) * 100,
+            "min_value"      : min_value,
+            "trade_log"      : trade_log,
         }
+        if self.apply_tax:
+            result["total_tax_paid"] = total_tax_paid
+        return result
+
 
     def _print_results(self, res):
+        tax_str  = " | Tax-Aware (After-Tax TWR)" if self.apply_tax else ""
         mode_str = f" | DCA: ${self.annual_dca:,.0f}/yr" if self.annual_dca > 0 else " | Lump Sum"
-        print(f"--- Running {res['strategy']}: {self.leverage}x {self.base_ticker}{mode_str} ---")
+        print(f"--- Running {res['strategy']}: {self.leverage}x {self.base_ticker}{mode_str}{tax_str} ---")
 
         if self.annual_dca > 0:
             print(f"Total Invested: ${res['total_invested']:,.2f}")
@@ -387,15 +534,33 @@ class Backtester:
 
         print(f"Final Value:    ${res['final_value']:,.2f}")
         print(f"Lowest Value:   ${res['min_value']:,.2f}")
-        print(f"Strategy TWR:   {res['strategy_twr']:,.2f}%")
+        print(f"Strategy TWR:   {res['strategy_twr']:,.2f}%" +
+              (" (after-tax)" if self.apply_tax else ""))
         print(f"Max Drawdown:   {res['max_drawdown']:.4f}%")
+
+        if self.apply_tax and "total_tax_paid" in res:
+            print(f"Tax Paid:       ${res['total_tax_paid']:,.2f}")
 
         # Print the new universal stats
         print(f"Total Trades:   {res.get('total_trades', 0)}")
         print(f"Avg Cash Hold:  {res.get('avg_cash_hold', 0):.1f} Trading Days | Total Cash Periods: {res.get('total_cash_periods', 0)}")
 
+        # --- Per-trade log ---
+        trade_log = res.get("trade_log", [])
+        if trade_log:
+            print(f"\n  {'#':<4} {'Entry':<12} {'Exit':<12} {'Hold Days':<11} {'Return':>8}  {'Tax Info'}")
+            print(f"  {'-'*4} {'-'*11} {'-'*11} {'-'*10} {'-'*8}  {'-'*26}")
+            for i, t in enumerate(trade_log, 1):
+                tax_info = ""
+                if self.apply_tax and t.get("tax_paid", 0) > 0:
+                    tax_info = f"{t['tax_type']}, Tax: ${t['tax_paid']:,.0f}"
+                print(f"  {i:<4} {str(t['entry_date'])[:10]:<12} {str(t['exit_date'])[:10]:<12} "
+                      f"{t['hold_days']:<11} {t['gross_ret_pct']:>+7.1f}%  {tax_info}")
+
         # Print any remaining custom stats returned by the strategy
-        skip_keys = {"strategy", "final_value", "total_invested", "max_drawdown", "strategy_twr", "total_roi", "min_value", "total_trades", "avg_cash_hold", "total_cash_periods"}
+        skip_keys = {"strategy", "final_value", "total_invested", "max_drawdown", "strategy_twr",
+                     "total_roi", "min_value", "total_trades", "avg_cash_hold", "total_cash_periods",
+                     "total_tax_paid", "trade_log"}
         for key, value in res.items():
             if key in skip_keys:
                 continue
@@ -406,58 +571,67 @@ class Backtester:
 class RollingBacktester:
     """Orchestrates multiple backtests across a rolling window of start dates."""
     def __init__(self, start_dates, base_ticker="^NDX", period_years=25,
-                 leverage=3, expense_ratio=0.0095, initial_fund=10000, annual_dca=0):
-        self.start_dates = start_dates
-        self.base_ticker = base_ticker
-        self.period_years = period_years
-        self.leverage = leverage
+                 leverage=3, expense_ratio=0.0095, initial_fund=10000, annual_dca=0,
+                 apply_tax=False, metric_key="strategy_twr", metric_label="TWR",
+                 signal_ticker=None):
+        self.start_dates   = start_dates
+        self.base_ticker   = base_ticker
+        self.signal_ticker = signal_ticker if signal_ticker else base_ticker
+        self.period_years  = period_years
+        self.leverage      = leverage
         self.expense_ratio = expense_ratio
-        self.initial_fund = initial_fund
-        self.annual_dca = annual_dca
+        self.initial_fund  = initial_fund
+        self.annual_dca    = annual_dca
+        self.apply_tax     = apply_tax
+        self.metric_key    = metric_key
+        self.metric_label  = metric_label
 
     def run(self, strategies):
         """
-        Executes a list of Strategy objects across all start dates.
+        Executes a list of Strategy objects across all start dates in parallel.
         Returns a formatted DataFrame comparing them.
+
+        Thread safety: both caches are pre-warmed before launching threads so
+        all workers only read (no concurrent downloads). Each Backtester and
+        each strategy call operates on its own data copy.
         """
-        results_list = []
-        metric_key = "strategy_twr"
-        metric_label = "TWR"
+        metric_key   = self.metric_key
+        metric_label = self.metric_label
 
-        for start_date in self.start_dates:
+        # Pre-warm both caches before parallel workers start
+        get_cached_signals(self.signal_ticker)
+        if self.signal_ticker != self.base_ticker:
+            get_cached_signals(self.base_ticker)
+
+        def _run_single(start_date):
             date_str = start_date.strftime('%Y-%m-%d')
-
-            # Spin up a silent environment for this specific start date
             env = Backtester(
-                base_ticker=self.base_ticker,
-                start_date=date_str,
-                period_years=self.period_years,
-                leverage=self.leverage,
-                expense_ratio=self.expense_ratio,
-                initial_fund=self.initial_fund,
-                annual_dca=self.annual_dca,
-                verbose=False
+                base_ticker   = self.base_ticker,
+                signal_ticker = self.signal_ticker,
+                start_date    = date_str,
+                period_years  = self.period_years,
+                leverage      = self.leverage,
+                expense_ratio = self.expense_ratio,
+                initial_fund  = self.initial_fund,
+                annual_dca    = self.annual_dca,
+                apply_tax     = self.apply_tax,
+                verbose       = False,
             )
-
-            # Dictionary to hold this row's results
             row_data = {"Start Date": start_date}
-            valid_run = True
-
-            # Test every strategy passed in
             for strat in strategies:
                 res = env.run(strat)
                 if res is None:
-                    valid_run = False
-                    break  # Skip this date entirely if data is missing
-
-                # Dynamically use the strategy's name for the column headers
+                    return None  # Missing data — skip this date
                 row_data[f"{strat.name} {metric_label} (%)"] = res[metric_key]
-                row_data[f"{strat.name} Max DD (%)"] = res["max_drawdown"]
-                # RECORD TOTAL TRADES HERE
-                row_data[f"{strat.name} Total Trades"] = res.get("total_trades", 0)
+                row_data[f"{strat.name} Max DD (%)"]          = res["max_drawdown"]
+                row_data[f"{strat.name} Total Trades"]        = res.get("total_trades", 0)
+            return row_data
 
-            if valid_run:
-                results_list.append(row_data)
+        workers = min(8, len(self.start_dates))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures      = [pool.submit(_run_single, d) for d in self.start_dates]
+            raw          = [f.result() for f in futures]
+            results_list = [r for r in raw if r is not None]
 
         return pd.DataFrame(results_list)
 
@@ -469,7 +643,9 @@ def run_experiment_suite(
     period_years=26,
     annual_dca=0,
     base_ticker="^NDX",
+    signal_ticker=None,
     initial_fund=10000,
+    apply_tax=False,
     print_summary=True
 ):
     """
@@ -487,11 +663,13 @@ def run_experiment_suite(
         orchestrator = RollingBacktester(
             start_dates=start_dates,
             base_ticker=base_ticker,
+            signal_ticker=signal_ticker,
             period_years=period_years,
             leverage=config['leverage'],
             expense_ratio=config['expense'],
             initial_fund=initial_fund,
-            annual_dca=annual_dca
+            annual_dca=annual_dca,
+            apply_tax=apply_tax
         )
 
         df_result = orchestrator.run(strategies)
