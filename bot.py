@@ -6,16 +6,22 @@ import sys
 if sys.stdout.encoding.lower() != 'utf-8':
     sys.stdout.reconfigure(encoding='utf-8')
 
-from backtest.strat_backtest import SMATrendFollowing
+from backtest.strat_backtest import SMATrendFollowing, _download_with_retry
 
 def generate_market_report(strategy, monitor_ticker="QQQ", leveraged_ticker="TQQQ", sp500_ticker="SPY"):
     """
     Fetches strategy stats and formats them into your report template.
+    Downloads all required tickers in a single yf.download call to avoid
+    hitting Yahoo Finance rate limits from back-to-back requests.
     """
 
+    # Single download covering all tickers needed by both strategy calls.
+    all_tickers = f"{monitor_ticker} {leveraged_ticker} {sp500_ticker} ^VIX"
+    shared_data = _download_with_retry(all_tickers)
+
     # Get the stats dictionary from the strategy for both indices
-    stats_ndx = strategy.get_live_stats(monitor_ticker, leveraged_ticker)
-    stats_sp500 = strategy.get_live_stats(sp500_ticker, sp500_ticker) # Use SPY for both to avoid extra fetching
+    stats_ndx   = strategy.get_live_stats(monitor_ticker, leveraged_ticker, data=shared_data)
+    stats_sp500 = strategy.get_live_stats(sp500_ticker, sp500_ticker,       data=shared_data)
     
     # Check if either signal changed from yesterday
     signal_changed = stats_sp500["trend_changed"] or stats_ndx["trend_changed"]
@@ -47,7 +53,7 @@ def generate_market_report(strategy, monitor_ticker="QQQ", leveraged_ticker="TQQ
         f"{format_signal_section('SECONDARY SIGNAL - NASDAQ', monitor_ticker, stats_ndx)}\n"
         f"--------------------------\n"
         f"💰 **ASSET ALLOCATION**\n"
-        f"• Offensive ({leveraged_ticker}): {stats_ndx['tqqq_price']:.2f} (Adjust based on primary signal)\n"
+        f"• Offensive ({leveraged_ticker}): {stats_ndx['leveraged_price']:.2f} (Adjust based on primary signal)\n"
         f"• Defensive (SGOV): Suggested Hold (for hedging)\n"
         f"--------------------------\n"
         f"🚩 **RECOMMENDED ACTION:** {stats_sp500['action']}"

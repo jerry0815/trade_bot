@@ -4,6 +4,37 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2026-07-14] — Rate-Limit Resilience & Download Refactor
+
+### Bug Fix: `IndexError` on yfinance Rate-Limit (`strat_backtest.py`)
+- **Root cause:** Yahoo Finance rate-limits GitHub Actions runners (shared IPs used by many projects).
+  When rate-limited, `yf.download` silently returns an empty DataFrame. The subsequent `.iloc[-1]`
+  call on an empty Series raised `IndexError: single positional indexer is out-of-bounds`, masking
+  the true cause.
+- **Fix:** Added a module-level `_download_with_retry(tickers, period, max_retries=5)` helper that
+  retries the download up to 5 times with exponential back-off (15 s → 30 s → 60 s → 120 s).
+- **Fix:** Added a per-ticker empty-DataFrame guard after slicing the MultiIndex result. Raises a
+  descriptive `RuntimeError` naming the missing tickers instead of the cryptic `IndexError`.
+
+### Refactor: Single Shared Download (`bot.py` + `strat_backtest.py`)
+- `generate_market_report` previously triggered **two** separate `yf.download` calls (one for the
+  NDX signal, one for the S&P 500 signal), doubling rate-limit exposure on every run.
+- Refactored to perform **one combined download** — `"QQQ TQQQ SPY ^VIX"` — at the top of
+  `generate_market_report` and pass the resulting DataFrame to both `get_live_stats` calls via a
+  new optional `data=` parameter.
+- `BaseStrategy.get_live_stats` and `SMATrendFollowing.get_live_stats` both accept `data=None`;
+  when `data` is supplied the download step is skipped entirely. Standalone callers that omit
+  `data` continue to work unchanged.
+- `_download_with_retry` exported from `strat_backtest` and imported in `bot.py`.
+
+### Code Quality
+- Renamed local variable `tqqq` → `leveraged_df` in `BaseStrategy.get_live_stats` — the leveraged
+  ticker is not always TQQQ (e.g. the S&P 500 call passes `"SPY"`).
+- Renamed returned dict key `"tqqq_price"` → `"leveraged_price"` for the same reason; updated
+  the corresponding reference in `bot.py`.
+
+---
+
 ## [2026-07-12] — Cross-Signal Backtesting
 
 ### New Feature: `signal_ticker` Parameter

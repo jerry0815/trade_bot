@@ -1,3 +1,4 @@
+import time
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -15,6 +16,33 @@ TAX_SHORT_TERM_RATE = 0.25   # 25% on gains held <= 365 days
 # Global Caches
 DATA_CACHE = {}
 SIGNAL_CACHE = {}
+
+# ---------------------------------------------------------------------------
+# Download helper
+# ---------------------------------------------------------------------------
+
+def _download_with_retry(tickers, period="5y", max_retries=5):
+    """Download yfinance data with exponential back-off retry.
+
+    Returns a non-empty DataFrame or raises RuntimeError after all retries.
+    """
+    backoff = 15  # seconds between attempts
+    data = pd.DataFrame()
+    for attempt in range(1, max_retries + 1):
+        data = yf.download(tickers, period=period, progress=False, auto_adjust=False)
+        if not data.empty:
+            return data
+        if attempt < max_retries:
+            print(
+                f"[yf.download] Empty response for '{tickers}' "
+                f"(attempt {attempt}/{max_retries}). Retrying in {backoff}s..."
+            )
+            time.sleep(backoff)
+            backoff *= 2  # exponential back-off
+    raise RuntimeError(
+        f"[yf.download] Failed to download '{tickers}' after {max_retries} attempts. "
+        "yfinance may be rate-limiting this runner."
+    )
 
 def get_cached_data(ticker="^NDX"):
     """Fetches raw data once and caches it."""
@@ -113,26 +141,37 @@ class BaseStrategy:
     def _add_indicator_logic(self, df):
         raise NotImplementedError("Child strategies must implement _add_indicator_logic()")
 
-    def get_live_stats(self, monitor_ticker="QQQ", leveraged_ticker="TQQQ"):
-        # 1. Fetch all 3 tickers safely using native yf.download
-        # yfinance handles multi-ticker downloads much better natively and is thread-safe
-        tickers = f"{monitor_ticker} {leveraged_ticker} ^VIX"
-        data = yf.download(tickers, period="5y", progress=False, auto_adjust=False)
-        
+    def get_live_stats(self, monitor_ticker="QQQ", leveraged_ticker="TQQQ", data=None):
+        # 1. Use caller-supplied data (shared download) or fetch fresh with retry logic.
+        if data is None:
+            tickers = f"{monitor_ticker} {leveraged_ticker} ^VIX"
+            data = _download_with_retry(tickers)
+
         # If multiple tickers were requested, yfinance returns a MultiIndex DataFrame (Price, Ticker)
         # We need to extract the 'Close', 'High', 'Low' etc. for each ticker
         if isinstance(data.columns, pd.MultiIndex):
             # df is for monitor_ticker
-            df = data.xs(monitor_ticker, axis=1, level=1).dropna(subset=['Close']).copy()
-            # tqqq is for leveraged_ticker
-            tqqq = data.xs(leveraged_ticker, axis=1, level=1).dropna(subset=['Close']).copy()
+            df           = data.xs(monitor_ticker,   axis=1, level=1).dropna(subset=['Close']).copy()
+            # leveraged_df is for leveraged_ticker
+            leveraged_df = data.xs(leveraged_ticker, axis=1, level=1).dropna(subset=['Close']).copy()
             # vix is for ^VIX
-            vix = data.xs("^VIX", axis=1, level=1).dropna(subset=['Close']).copy()
+            vix          = data.xs("^VIX",           axis=1, level=1).dropna(subset=['Close']).copy()
         else:
             # Fallback if only one ticker was somehow fetched
-            df = data.dropna(subset=['Close']).copy()
-            tqqq = data.dropna(subset=['Close']).copy()
-            vix = data.dropna(subset=['Close']).copy()
+            df           = data.dropna(subset=['Close']).copy()
+            leveraged_df = data.dropna(subset=['Close']).copy()
+            vix          = data.dropna(subset=['Close']).copy()
+
+        # Guard: ensure each ticker's slice actually has rows before proceeding
+        missing = []
+        if df.empty:           missing.append(monitor_ticker)
+        if leveraged_df.empty: missing.append(leveraged_ticker)
+        if vix.empty:          missing.append("^VIX")
+        if missing:
+            raise RuntimeError(
+                f"[get_live_stats] Data is empty for: {missing}. "
+                "This is likely a yfinance rate-limit issue — re-run the action or add a delay."
+            )
 
         # 2. Process data
         self.df = prep_base_indicators(df, vix['Close'])
@@ -152,8 +191,8 @@ class BaseStrategy:
 
         # 4. Return the base report stats
         return {
-            "qqq_price"            : float(self.df['Close'].iloc[-1].item()),
-            "tqqq_price"           : float(tqqq['Close'].iloc[-1]),
+            "qqq_price"      : float(self.df['Close'].iloc[-1].item()),
+            "leveraged_price": float(leveraged_df['Close'].iloc[-1]),
             "action"               : "BUY/HOLD" if current_state else "SELL/CASH",
             "days_in_current_state": int(streak),
             "state_since"          : state_since.strftime("%Y-%m-%d"),
@@ -177,9 +216,9 @@ class SMATrendFollowing(BaseStrategy):
         self.buffer_pct = buffer_pct
         self.atr_multiplier = atr_multiplier
 
-    def get_live_stats(self, monitor_ticker="QQQ", leveraged_ticker="TQQQ"):
-        # 1. Get the base data
-        stats = super().get_live_stats(monitor_ticker, leveraged_ticker)
+    def get_live_stats(self, monitor_ticker="QQQ", leveraged_ticker="TQQQ", data=None):
+        # 1. Get the base data (pass shared pre-downloaded data if provided)
+        stats = super().get_live_stats(monitor_ticker, leveraged_ticker, data=data)
         
         def _get_trend_for_day(idx):
             price = float(self.df['Close'].iloc[idx])
