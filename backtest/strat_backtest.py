@@ -29,12 +29,17 @@ def _download_with_retry(tickers, period="5y", max_retries=5):
     backoff = 15  # seconds between attempts
     data = pd.DataFrame()
     for attempt in range(1, max_retries + 1):
-        data = yf.download(tickers, period=period, progress=False, auto_adjust=False)
-        if not data.empty:
-            return data
+        try:
+            data = yf.download(tickers, period=period, progress=False, auto_adjust=False, threads=False)
+            if not data.empty:
+                return data
+        except Exception as e:
+            print(f"[yf.download] Exception during download: {e}")
+            data = pd.DataFrame()
+
         if attempt < max_retries:
             print(
-                f"[yf.download] Empty response for '{tickers}' "
+                f"[yf.download] Empty response or error for '{tickers}' "
                 f"(attempt {attempt}/{max_retries}). Retrying in {backoff}s..."
             )
             time.sleep(backoff)

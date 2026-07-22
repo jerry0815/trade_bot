@@ -4,6 +4,15 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2026-07-22] — Bug Fix: yfinance SQLite Database Locking
+
+### Bug Fix: `OperationalError` on yfinance Rate-Limit (`strat_backtest.py`)
+- **Root cause:** yfinance downloads multiple tickers simultaneously using threads by default. It relies on an internal SQLite cache (via `requests_cache`), which can occasionally throw `OperationalError('database is locked')` when concurrent threads try to access it simultaneously on GitHub runners.
+- **Fix:** Added `threads=False` to the `yf.download` call in `_download_with_retry` to prevent concurrent database writes.
+- **Fix:** Wrapped the `yf.download` call in a `try...except Exception` block to catch `OperationalError` and other unexpected exceptions. This ensures the script doesn't crash on transient errors but instead moves gracefully into the exponential back-off retry loop.
+
+---
+
 ## [2026-07-14] — Rate-Limit Resilience & Download Refactor
 
 ### Bug Fix: `IndexError` on yfinance Rate-Limit (`strat_backtest.py`)
