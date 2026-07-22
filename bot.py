@@ -54,7 +54,7 @@ def generate_market_report(strategy, monitor_ticker="QQQ", leveraged_ticker="TQQ
         f"--------------------------\n"
         f"💰 **ASSET ALLOCATION**\n"
         f"• Offensive ({leveraged_ticker}): {stats_ndx['leveraged_price']:.2f} (Adjust based on primary signal)\n"
-        f"• Defensive (SGOV): Suggested Hold (for hedging)\n"
+        f"• Defensive (50% SGOV / 50% KMLM): Suggested Hold (for hedging)\n"
         f"--------------------------\n"
         f"🚩 **RECOMMENDED ACTION:** {stats_sp500['action']}"
     )
@@ -64,7 +64,7 @@ def generate_market_report(strategy, monitor_ticker="QQQ", leveraged_ticker="TQQ
 def run_bot():
     webhook_url = os.environ.get("DISCORD_WEBHOOK")
 
-    strat = SMATrendFollowing(sma_window=200)
+    strat = SMATrendFollowing(sma_window=200, atr_window=50, t2_confirmation=True)
     message = generate_market_report(strat)
     
     # Send to Discord

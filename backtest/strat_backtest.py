@@ -115,6 +115,36 @@ def get_cached_signals(ticker="^NDX", sma_window=200):
 
     return SIGNAL_CACHE[cache_key].copy()
 
+def get_defensive_proxy_returns():
+    """Builds a blended 50/50 KMLM/SGOV return array spliced with RYMTX/SHY history."""
+    if "DEFENSIVE_PROXY" in DATA_CACHE:
+        return DATA_CACHE["DEFENSIVE_PROXY"]
+    
+    tickers = ["KMLM", "SGOV", "RYMTX", "SHY"]
+    for t in tickers:
+        get_cached_data(t)
+        
+    base_idx = get_cached_data("^NDX").index
+    ret_df = pd.DataFrame(index=base_idx)
+    
+    for t in tickers:
+        df = DATA_CACHE[t]
+        if not df.empty:
+            ret_df[t] = df['Close'].pct_change()
+        else:
+            ret_df[t] = np.nan
+            
+    # Splicing KMLM (fallback to RYMTX, then 0 return)
+    kmlm_full = ret_df['KMLM'].fillna(ret_df['RYMTX']).fillna(0.0)
+    
+    # Splicing SGOV (fallback to SHY)
+    sgov_full = ret_df['SGOV'].fillna(ret_df['SHY'])
+    
+    ret_df['DEFENSIVE_BLEND'] = (kmlm_full * 0.5) + (sgov_full * 0.5)
+    
+    DATA_CACHE["DEFENSIVE_PROXY"] = ret_df['DEFENSIVE_BLEND']
+    return DATA_CACHE["DEFENSIVE_PROXY"]
+
 def cache_clear():
     """
     Clears all in-memory data and signal caches.
@@ -213,13 +243,17 @@ class BuyAndHold(BaseStrategy):
         return df
 
 class SMATrendFollowing(BaseStrategy):
-    def __init__(self, sma_window=200, buffer_pct=None, atr_multiplier=2.5):
+    def __init__(self, sma_window=200, buffer_pct=None, atr_multiplier=2.5, atr_window=14, t2_confirmation=False):
         # We handle naming and initialization cleanly
-        name = f"SMA {sma_window} - " + (f"Static {buffer_pct*100}% Buffer" if buffer_pct else f"ATR Buffer (x{atr_multiplier})")
+        name = f"SMA {sma_window} - " + (f"Static {buffer_pct*100}% Buffer" if buffer_pct else f"ATR({atr_window}) Buffer (x{atr_multiplier})")
+        if t2_confirmation:
+            name += " [T+2]"
         super().__init__(name=name)
         self.sma_window = sma_window
         self.buffer_pct = buffer_pct
         self.atr_multiplier = atr_multiplier
+        self.atr_window = atr_window
+        self.t2_confirmation = t2_confirmation
 
     def get_live_stats(self, monitor_ticker="QQQ", leveraged_ticker="TQQQ", data=None):
         # 1. Get the base data (pass shared pre-downloaded data if provided)
@@ -266,6 +300,9 @@ class SMATrendFollowing(BaseStrategy):
         # Always recompute SMA for this strategy's own window.
         # The cached df has SMA=200; if sma_window differs this would silently use the wrong line.
         df['SMA'] = df['Close'].rolling(window=self.sma_window).mean()
+        # Also recompute ATR for this strategy's own window.
+        df['ATR'] = df['True_Range'].rolling(window=self.atr_window).mean()
+        
         # 1. Calculate bounds universally for the entire dataframe at once
         if self.buffer_pct:
             upper_bound = df['SMA'] * (1 + self.buffer_pct)
@@ -278,9 +315,10 @@ class SMATrendFollowing(BaseStrategy):
         buy_signal = df['Close'] > upper_bound
         sell_signal = df['Close'] < lower_bound
 
-        # # --- THE 3-DAY CONFIRMATION RULE ---
-        # buy_signal = buy_signal.rolling(window=3).min() == 1
-        # sell_signal = sell_signal.rolling(window=3).min() == 1
+        # 2b. Optional T+2 confirmation (2 consecutive signals required)
+        if self.t2_confirmation:
+            buy_signal = buy_signal.rolling(window=2).min() == 1
+            sell_signal = sell_signal.rolling(window=2).min() == 1
 
         # 3. Create a state tracker using np.nan (float) to avoid object dtype warnings
         state = pd.Series(np.nan, index=df.index)
@@ -369,7 +407,7 @@ class Backtester:
     """The simulation engine handling money, drawdowns, and data ingestion."""
     def __init__(self, base_ticker="^NDX", start_date="1999-01-01", period_years=25,
                  leverage=3, expense_ratio=0.0095, initial_fund=10000, annual_dca=0,
-                 apply_tax=False, verbose=True, signal_ticker=None):
+                 apply_tax=False, verbose=True, signal_ticker=None, use_defensive_proxy=False):
         self.base_ticker   = base_ticker
         # signal_ticker: ticker used to generate strategy signals (in_market).
         # If None or same as base_ticker, standard single-ticker mode.
@@ -377,6 +415,7 @@ class Backtester:
         # ^GSPC price/indicators for signal generation but portfolio returns
         # are computed from ^NDX daily moves — i.e. "trade TQQQ on SP500 signal".
         self.signal_ticker = signal_ticker if signal_ticker else base_ticker
+        self.use_defensive_proxy = use_defensive_proxy
         self.start_dt      = pd.to_datetime(start_date)
         self.end_dt        = self.start_dt + pd.DateOffset(years=period_years)
         self.period_years  = period_years
@@ -483,7 +522,15 @@ class Backtester:
 
         # --- Pre-compute the full daily_return array in one vectorised pass ---
         leverage_drag = (((self.leverage - 1) * br_arr) + self.expense_ratio) / 252
-        cash_ret      = (br_arr * 0.8) / 252
+        
+        if self.use_defensive_proxy:
+            def_proxy_series = get_defensive_proxy_returns()
+            def_ret = def_proxy_series.reindex(dates).values
+            fallback_cash = (br_arr * 0.8) / 252
+            # Replace NaNs in def_ret (e.g., pre-2002 before SHY existed) with cash yield
+            cash_ret = np.where(np.isnan(def_ret), fallback_cash, def_ret)
+        else:
+            cash_ret = (br_arr * 0.8) / 252
 
         # Default: leveraged close-to-close when in market, cash when out
         daily_ret_arr = np.where(in_mkt,
@@ -624,10 +671,11 @@ class RollingBacktester:
     def __init__(self, start_dates, base_ticker="^NDX", period_years=25,
                  leverage=3, expense_ratio=0.0095, initial_fund=10000, annual_dca=0,
                  apply_tax=False, metric_key="strategy_twr", metric_label="TWR",
-                 signal_ticker=None):
+                 signal_ticker=None, use_defensive_proxy=False):
         self.start_dates   = start_dates
         self.base_ticker   = base_ticker
         self.signal_ticker = signal_ticker if signal_ticker else base_ticker
+        self.use_defensive_proxy = use_defensive_proxy
         self.period_years  = period_years
         self.leverage      = leverage
         self.expense_ratio = expense_ratio
@@ -653,6 +701,8 @@ class RollingBacktester:
         get_cached_signals(self.signal_ticker)
         if self.signal_ticker != self.base_ticker:
             get_cached_signals(self.base_ticker)
+        if self.use_defensive_proxy:
+            get_defensive_proxy_returns()
 
         def _run_single(start_date):
             date_str = start_date.strftime('%Y-%m-%d')
@@ -667,6 +717,7 @@ class RollingBacktester:
                 annual_dca    = self.annual_dca,
                 apply_tax     = self.apply_tax,
                 verbose       = False,
+                use_defensive_proxy = self.use_defensive_proxy
             )
             row_data = {"Start Date": start_date}
             for strat in strategies:
@@ -697,7 +748,8 @@ def run_experiment_suite(
     signal_ticker=None,
     initial_fund=10000,
     apply_tax=False,
-    print_summary=True
+    print_summary=True,
+    use_defensive_proxy=False
 ):
     """
     Takes a list of leverage configs and strategies, runs them all through
@@ -720,7 +772,8 @@ def run_experiment_suite(
             expense_ratio=config['expense'],
             initial_fund=initial_fund,
             annual_dca=annual_dca,
-            apply_tax=apply_tax
+            apply_tax=apply_tax,
+            use_defensive_proxy=use_defensive_proxy
         )
 
         df_result = orchestrator.run(strategies)
