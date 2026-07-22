@@ -4,6 +4,14 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2026-07-22] — Feature: T+2 Confirmation Delay & Strategy Optimization Analysis
+
+### New Feature: T+2 Signal Confirmation (`strat_backtest.py`, `bot.py`)
+- **T+2 Mechanism**: Added `t2_confirmation` parameter to `SMATrendFollowing`. When enabled, buy/sell signals must persist for two consecutive trading days (`rolling(window=2).min() == 1`) before executing a state change. This prevents "whipsaw" false signals from triggering trades on a single day of high volatility.
+- **Bot Output**: Updated `bot.py` to display the exact upper and lower ATR bounds so that it is clear when price approaches a threshold. Also added a `Pending SELL/BUY` warning that displays on the first day of a trend change while waiting for the T+2 confirmation.
+- **Ablation Study**: Conducted a 20-year ablation study on ATR bounds (14 vs 50) and defensive asset holds (Cash vs KMLM+SGOV). Concluded that T+2 confirmation alone offers the best risk-adjusted performance boost while a 50-day ATR and managed futures blend underperformed the baseline.
+
+---
 ## [2026-07-22] — Bug Fix: yfinance SQLite Database Locking
 
 ### Bug Fix: `OperationalError` on yfinance Rate-Limit (`strat_backtest.py`)

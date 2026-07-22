@@ -213,13 +213,16 @@ class BuyAndHold(BaseStrategy):
         return df
 
 class SMATrendFollowing(BaseStrategy):
-    def __init__(self, sma_window=200, buffer_pct=None, atr_multiplier=2.5):
+    def __init__(self, sma_window=200, buffer_pct=None, atr_multiplier=2.5, t2_confirmation=False):
         # We handle naming and initialization cleanly
         name = f"SMA {sma_window} - " + (f"Static {buffer_pct*100}% Buffer" if buffer_pct else f"ATR Buffer (x{atr_multiplier})")
+        if t2_confirmation:
+            name += " [T+2]"
         super().__init__(name=name)
         self.sma_window = sma_window
         self.buffer_pct = buffer_pct
         self.atr_multiplier = atr_multiplier
+        self.t2_confirmation = t2_confirmation
 
     def get_live_stats(self, monitor_ticker="QQQ", leveraged_ticker="TQQQ", data=None):
         # 1. Get the base data (pass shared pre-downloaded data if provided)
@@ -238,16 +241,18 @@ class SMATrendFollowing(BaseStrategy):
                 lower_bound = sma - (atr * self.atr_multiplier)
                 
             if price > upper_bound:
-                return "BULLISH", sma
+                return "BULLISH", sma, upper_bound, lower_bound
             elif price < lower_bound:
-                return "BEARISH", sma
-            return "NEUTRAL", sma
+                return "BEARISH", sma, upper_bound, lower_bound
+            return "NEUTRAL", sma, upper_bound, lower_bound
 
-        current_trend, current_sma = _get_trend_for_day(-1)
-        previous_trend, _ = _get_trend_for_day(-2)
+        current_trend, current_sma, upper, lower = _get_trend_for_day(-1)
+        previous_trend, _, _, _ = _get_trend_for_day(-2)
         
         stats.update({
             "current_sma": current_sma,
+            "upper_bound": upper,
+            "lower_bound": lower,
             "trend": current_trend,
             "previous_trend": previous_trend,
             "trend_changed": current_trend != previous_trend
@@ -278,9 +283,9 @@ class SMATrendFollowing(BaseStrategy):
         buy_signal = df['Close'] > upper_bound
         sell_signal = df['Close'] < lower_bound
 
-        # # --- THE 3-DAY CONFIRMATION RULE ---
-        # buy_signal = buy_signal.rolling(window=3).min() == 1
-        # sell_signal = sell_signal.rolling(window=3).min() == 1
+        if self.t2_confirmation:
+            buy_signal = buy_signal.rolling(window=2).min() == 1
+            sell_signal = sell_signal.rolling(window=2).min() == 1
 
         # 3. Create a state tracker using np.nan (float) to avoid object dtype warnings
         state = pd.Series(np.nan, index=df.index)

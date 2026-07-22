@@ -38,10 +38,17 @@ def generate_market_report(strategy, monitor_ticker="QQQ", leveraged_ticker="TQQ
         trend = stats.get('trend', 'N/A')
         emoji = "🟩" if trend == "BULLISH" else "🟥" if trend == "BEARISH" else "🟨"
         
+        pending_msg = ""
+        if stats.get("action", "").startswith("BUY") and trend == "BEARISH":
+            pending_msg = "\n  ⚠️ **Pending SELL** (waiting for T+2 confirmation)"
+        elif stats.get("action", "").startswith("SELL") and trend == "BULLISH":
+            pending_msg = "\n  ⚠️ **Pending BUY** (waiting for T+2 confirmation)"
+            
         return (
             f"📈 **{title} ({ticker})**\n"
             f"• Price: {stats['qqq_price']:.2f} | SMA(200): {stats.get('current_sma', 0.0):.2f}\n"
-            f"• Status: **{trend}** {emoji}\n"
+            f"• ATR Bounds: ⬆️ {stats.get('upper_bound', 0.0):.2f} | ⬇️ {stats.get('lower_bound', 0.0):.2f}\n"
+            f"• Status: **{trend}** {emoji}{pending_msg}\n"
             f"• Duration: {streak_days} trading days {state_label} (since {state_since})"
         )
 
@@ -64,7 +71,7 @@ def generate_market_report(strategy, monitor_ticker="QQQ", leveraged_ticker="TQQ
 def run_bot():
     webhook_url = os.environ.get("DISCORD_WEBHOOK")
 
-    strat = SMATrendFollowing(sma_window=200)
+    strat = SMATrendFollowing(sma_window=200, t2_confirmation=True)
     message = generate_market_report(strat)
     
     # Send to Discord
