@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from strat_backtest import Backtester
+from strat_backtest import Backtester, RollingBacktester
 
 def test_inverse_leverage_init():
     bt = Backtester(initial_fund=10000, leverage=3)
@@ -51,9 +51,16 @@ def test_default_cash_math():
     assert np.isclose(res['final_value'], expected_final), f"Expected {expected_final}, got {res['final_value']}"
     print("test_default_cash_math PASSED")
 
+def test_rolling_inverse():
+    rbt = RollingBacktester(start_dates=[], inverse_leverage=-1.0)
+    assert getattr(rbt, 'inverse_leverage') == -1.0
+    print("test_rolling_inverse PASSED")
+
 if __name__ == "__main__":
     test_inverse_leverage_init()
     test_short_math()
     test_default_cash_math()
+    test_rolling_inverse()
+
 
 

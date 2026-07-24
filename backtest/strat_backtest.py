@@ -692,13 +692,14 @@ class RollingBacktester:
     def __init__(self, start_dates, base_ticker="^NDX", period_years=25,
                  leverage=3, expense_ratio=0.0095, initial_fund=10000, annual_dca=0,
                  apply_tax=False, metric_key="strategy_twr", metric_label="TWR",
-                 signal_ticker=None, use_defensive_proxy=False):
+                 signal_ticker=None, use_defensive_proxy=False, inverse_leverage=0.0):
         self.start_dates   = start_dates
         self.base_ticker   = base_ticker
         self.signal_ticker = signal_ticker if signal_ticker else base_ticker
         self.use_defensive_proxy = use_defensive_proxy
         self.period_years  = period_years
         self.leverage      = leverage
+        self.inverse_leverage = inverse_leverage
         self.expense_ratio = expense_ratio
         self.initial_fund  = initial_fund
         self.annual_dca    = annual_dca
@@ -733,6 +734,7 @@ class RollingBacktester:
                 start_date    = date_str,
                 period_years  = self.period_years,
                 leverage      = self.leverage,
+                inverse_leverage = self.inverse_leverage,
                 expense_ratio = self.expense_ratio,
                 initial_fund  = self.initial_fund,
                 annual_dca    = self.annual_dca,
@@ -770,7 +772,8 @@ def run_experiment_suite(
     initial_fund=10000,
     apply_tax=False,
     print_summary=True,
-    use_defensive_proxy=False
+    use_defensive_proxy=False,
+    inverse_leverage=0.0
 ):
     """
     Takes a list of leverage configs and strategies, runs them all through
@@ -790,6 +793,7 @@ def run_experiment_suite(
             signal_ticker=signal_ticker,
             period_years=period_years,
             leverage=config['leverage'],
+            inverse_leverage=config.get('inverse_leverage', inverse_leverage),
             expense_ratio=config['expense'],
             initial_fund=initial_fund,
             annual_dca=annual_dca,
