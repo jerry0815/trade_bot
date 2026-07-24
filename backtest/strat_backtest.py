@@ -407,7 +407,8 @@ class Backtester:
     """The simulation engine handling money, drawdowns, and data ingestion."""
     def __init__(self, base_ticker="^NDX", start_date="1999-01-01", period_years=25,
                  leverage=3, expense_ratio=0.0095, initial_fund=10000, annual_dca=0,
-                 apply_tax=False, verbose=True, signal_ticker=None, use_defensive_proxy=False):
+                 apply_tax=False, verbose=True, signal_ticker=None, use_defensive_proxy=False,
+                 inverse_leverage=0.0):
         self.base_ticker   = base_ticker
         # signal_ticker: ticker used to generate strategy signals (in_market).
         # If None or same as base_ticker, standard single-ticker mode.
@@ -420,6 +421,7 @@ class Backtester:
         self.end_dt        = self.start_dt + pd.DateOffset(years=period_years)
         self.period_years  = period_years
         self.leverage      = leverage
+        self.inverse_leverage = inverse_leverage
         self.expense_ratio = expense_ratio
         self.initial_fund  = initial_fund
         self.annual_dca    = annual_dca
