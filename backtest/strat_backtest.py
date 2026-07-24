@@ -524,6 +524,7 @@ class Backtester:
 
         # --- Pre-compute the full daily_return array in one vectorised pass ---
         leverage_drag = (((self.leverage - 1) * br_arr) + self.expense_ratio) / 252
+        inverse_leverage_drag = (((abs(self.inverse_leverage) - 1) * br_arr) + self.expense_ratio) / 252
         
         if self.use_defensive_proxy:
             def_proxy_series = get_defensive_proxy_returns()
@@ -534,16 +535,34 @@ class Backtester:
         else:
             cash_ret = (br_arr * 0.8) / 252
 
-        # Default: leveraged close-to-close when in market, cash when out
+        if getattr(self, 'inverse_leverage', 0.0) != 0.0:
+            short_ret = (ret_arr * self.inverse_leverage) - inverse_leverage_drag
+            out_of_market_ret = short_ret
+        else:
+            out_of_market_ret = cash_ret
+
+        # Default: leveraged close-to-close when in market, cash or short when out
         daily_ret_arr = np.where(in_mkt,
                                  ret_arr * self.leverage - leverage_drag,
-                                 cash_ret)
-        # Entry days: only earn open→close (entered at open, missed overnight gap)
-        daily_ret_arr[entering_mask] = (o2c_arr[entering_mask] * self.leverage
-                                        - leverage_drag[entering_mask])
-        # Exit days: sell at open, capture only overnight gap at leverage
-        daily_ret_arr[exiting_mask]  = (ovn_arr[exiting_mask] * self.leverage
-                                        - leverage_drag[exiting_mask])
+                                 out_of_market_ret)
+        
+        # Entry days: exit short overnight, enter long at open
+        if getattr(self, 'inverse_leverage', 0.0) != 0.0:
+            short_ovn = (ovn_arr[entering_mask] * self.inverse_leverage) - inverse_leverage_drag[entering_mask]
+            long_o2c = (o2c_arr[entering_mask] * self.leverage) - leverage_drag[entering_mask]
+            daily_ret_arr[entering_mask] = ((1 + short_ovn) * (1 + long_o2c)) - 1
+        else:
+            daily_ret_arr[entering_mask] = (o2c_arr[entering_mask] * self.leverage
+                                            - leverage_drag[entering_mask])
+                                            
+        # Exit days: exit long overnight, enter short at open
+        if getattr(self, 'inverse_leverage', 0.0) != 0.0:
+            long_ovn = (ovn_arr[exiting_mask] * self.leverage) - leverage_drag[exiting_mask]
+            short_o2c = (o2c_arr[exiting_mask] * self.inverse_leverage) - inverse_leverage_drag[exiting_mask]
+            daily_ret_arr[exiting_mask] = ((1 + long_ovn) * (1 + short_o2c)) - 1
+        else:
+            daily_ret_arr[exiting_mask]  = (ovn_arr[exiting_mask] * self.leverage
+                                            - leverage_drag[exiting_mask])
 
         # --- Scalar loop: only handles running-value-dependent state ---
         portfolio_value = self.initial_fund
