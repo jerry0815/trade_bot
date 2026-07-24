@@ -116,34 +116,102 @@ def get_cached_signals(ticker="^NDX", sma_window=200):
     return SIGNAL_CACHE[cache_key].copy()
 
 def get_defensive_proxy_returns():
-    """Builds a blended 50/50 KMLM/SGOV return array spliced with RYMTX/SHY history."""
+    """Calculates Dynamic Defensive Rotation (126-day Absolute Momentum).
+    Tracks KMLM, TLT, GLD, SHY and rotates into the highest momentum asset.
+    """
     if "DEFENSIVE_PROXY" in DATA_CACHE:
         return DATA_CACHE["DEFENSIVE_PROXY"]
     
-    tickers = ["KMLM", "SGOV", "RYMTX", "SHY"]
+    tickers = ["KMLM", "RYMTX", "TLT", "VUSTX", "GLD", "SHY"]
     for t in tickers:
         get_cached_data(t)
         
     base_idx = get_cached_data("^NDX").index
+    price_df = pd.DataFrame(index=base_idx)
     ret_df = pd.DataFrame(index=base_idx)
     
     for t in tickers:
         df = DATA_CACHE[t]
         if not df.empty:
+            price_df[t] = df['Close']
             ret_df[t] = df['Close'].pct_change()
         else:
+            price_df[t] = np.nan
             ret_df[t] = np.nan
             
-    # Splicing KMLM (fallback to RYMTX, then 0 return)
-    kmlm_full = ret_df['KMLM'].fillna(ret_df['RYMTX']).fillna(0.0)
+    mom_df = pd.DataFrame(index=base_idx)
+    for t in tickers:
+        mom_df[t] = price_df[t].pct_change(126)
+        
+    mom_kmlm = mom_df['KMLM'].fillna(mom_df['RYMTX']).fillna(0.0)
+    mom_tlt = mom_df['TLT'].fillna(mom_df['VUSTX']).fillna(0.0)
+    mom_gld = mom_df['GLD'].fillna(0.0)
+    mom_shy = mom_df['SHY'].fillna(0.0)
     
-    # Splicing SGOV (fallback to SHY)
-    sgov_full = ret_df['SGOV'].fillna(ret_df['SHY'])
+    mom_combined = pd.DataFrame({
+        'KMLM': mom_kmlm,
+        'TLT': mom_tlt,
+        'GLD': mom_gld,
+        'SHY': mom_shy
+    })
     
-    ret_df['DEFENSIVE_BLEND'] = (kmlm_full * 0.5) + (sgov_full * 0.5)
+    # Select best asset based on yesterday's momentum to prevent lookahead bias
+    best_asset = mom_combined.fillna(0.0).idxmax(axis=1).shift(1).fillna('SHY')
     
-    DATA_CACHE["DEFENSIVE_PROXY"] = ret_df['DEFENSIVE_BLEND']
-    return DATA_CACHE["DEFENSIVE_PROXY"]
+    # Splice daily returns
+    ret_kmlm = ret_df['KMLM'].fillna(ret_df['RYMTX']).fillna(0.0)
+    ret_tlt = ret_df['TLT'].fillna(ret_df['VUSTX']).fillna(0.0)
+    ret_gld = ret_df['GLD'].fillna(0.0)
+    ret_shy = ret_df['SHY'].fillna(0.0)
+    
+    ret_combined = pd.DataFrame({
+        'KMLM': ret_kmlm,
+        'TLT': ret_tlt,
+        'GLD': ret_gld,
+        'SHY': ret_shy
+    })
+    
+    final_returns = pd.Series(0.0, index=base_idx)
+    for col in ret_combined.columns:
+        mask = (best_asset == col)
+        final_returns[mask] = ret_combined.loc[mask, col]
+        
+    DATA_CACHE["DEFENSIVE_PROXY"] = final_returns
+    return final_returns
+
+def get_current_defensive_rotation(data):
+    """
+    Calculates the live 126-day momentum for KMLM, TLT, GLD, and SHY.
+    Returns a dictionary of the momentums and the current winner.
+    `data` should be a MultiIndex DataFrame from yfinance containing these tickers.
+    """
+    tickers = ["KMLM", "TLT", "GLD", "SHY"]
+    momentums = {}
+    
+    for t in tickers:
+        if isinstance(data.columns, pd.MultiIndex):
+            # Try to get the close price for this ticker
+            if t in data.columns.get_level_values(1):
+                close_series = data.xs(t, axis=1, level=1)['Close'].dropna()
+                if len(close_series) >= 126:
+                    mom = (close_series.iloc[-1] / close_series.iloc[-126]) - 1
+                    momentums[t] = float(mom)
+                else:
+                    momentums[t] = 0.0
+            else:
+                momentums[t] = 0.0
+        else:
+            momentums[t] = 0.0
+            
+    # Determine winner
+    winner = "SHY"
+    if momentums:
+        winner = max(momentums, key=momentums.get)
+        
+    return {
+        "momentums": momentums,
+        "winner": winner
+    }
 
 def cache_clear():
     """

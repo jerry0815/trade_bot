@@ -6,7 +6,7 @@ import sys
 if sys.stdout.encoding.lower() != 'utf-8':
     sys.stdout.reconfigure(encoding='utf-8')
 
-from backtest.strat_backtest import SMATrendFollowing, _download_with_retry
+from backtest.strat_backtest import SMATrendFollowing, _download_with_retry, get_current_defensive_rotation
 
 def generate_market_report(strategy, monitor_ticker="QQQ", leveraged_ticker="TQQQ", sp500_ticker="SPY"):
     """
@@ -16,12 +16,15 @@ def generate_market_report(strategy, monitor_ticker="QQQ", leveraged_ticker="TQQ
     """
 
     # Single download covering all tickers needed by both strategy calls.
-    all_tickers = f"{monitor_ticker} {leveraged_ticker} {sp500_ticker} ^VIX"
+    all_tickers = f"{monitor_ticker} {leveraged_ticker} {sp500_ticker} ^VIX KMLM TLT GLD SHY"
     shared_data = _download_with_retry(all_tickers)
 
     # Get the stats dictionary from the strategy for both indices
     stats_ndx   = strategy.get_live_stats(monitor_ticker, leveraged_ticker, data=shared_data)
     stats_sp500 = strategy.get_live_stats(sp500_ticker, sp500_ticker,       data=shared_data)
+    
+    # Get defensive rotation status
+    def_rot = get_current_defensive_rotation(shared_data)
     
     # Check if either signal changed from yesterday
     signal_changed = stats_sp500["trend_changed"] or stats_ndx["trend_changed"]
@@ -45,6 +48,18 @@ def generate_market_report(strategy, monitor_ticker="QQQ", leveraged_ticker="TQQ
             f"• Duration: {streak_days} trading days {state_label} (since {state_since})"
         )
 
+    winner = def_rot['winner']
+    display_winner = "SHY / SGOV" if winner == "SHY" else winner
+    moms = def_rot['momentums']
+    
+    def_msg = (
+        f"• Defensive (Dynamic Rotation): Hold **{display_winner}** during Sell signals\n"
+        f"  - KMLM: {moms.get('KMLM', 0.0)*100:+.2f}%\n"
+        f"  - TLT:  {moms.get('TLT', 0.0)*100:+.2f}%\n"
+        f"  - GLD:  {moms.get('GLD', 0.0)*100:+.2f}%\n"
+        f"  - SHY / SGOV:  {moms.get('SHY', 0.0)*100:+.2f}%"
+    )
+
     message = (
         f"📅 **Market Monitor Report ({date_str})**\n"
         f"{change_alert}\n"
@@ -54,7 +69,7 @@ def generate_market_report(strategy, monitor_ticker="QQQ", leveraged_ticker="TQQ
         f"--------------------------\n"
         f"💰 **ASSET ALLOCATION**\n"
         f"• Offensive ({leveraged_ticker}): {stats_ndx['leveraged_price']:.2f} (Adjust based on primary signal)\n"
-        f"• Defensive (50% SGOV / 50% KMLM): Suggested Hold (for hedging)\n"
+        f"{def_msg}\n"
         f"--------------------------\n"
         f"🚩 **RECOMMENDED ACTION:** {stats_sp500['action']}"
     )

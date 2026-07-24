@@ -56,11 +56,43 @@ def test_rolling_inverse():
     assert getattr(rbt, 'inverse_leverage') == -1.0
     print("test_rolling_inverse PASSED")
 
+def test_current_defensive_rotation():
+    from strat_backtest import get_current_defensive_rotation
+    
+    # Create a mock multi-index dataframe as returned by yfinance
+    # 127 days so we have exactly 126 days of momentum (iloc[-1] / iloc[-127] -> wait, it's iloc[-1] / iloc[-126] - 1)
+    dates = pd.date_range("2023-01-01", periods=130)
+    
+    # GLD goes up 20%
+    gld_prices = np.linspace(100, 120, 130)
+    # TLT goes down 10%
+    tlt_prices = np.linspace(100, 90, 130)
+    
+    # Construct MultiIndex
+    columns = pd.MultiIndex.from_tuples([('Close', 'GLD'), ('Close', 'TLT'), ('Close', 'KMLM'), ('Close', 'SHY')])
+    data = pd.DataFrame(index=dates, columns=columns)
+    
+    data[('Close', 'GLD')] = gld_prices
+    data[('Close', 'TLT')] = tlt_prices
+    data[('Close', 'KMLM')] = np.nan # KMLM missing data
+    data[('Close', 'SHY')] = 100.0 # SHY flat
+    
+    res = get_current_defensive_rotation(data)
+    
+    assert res['winner'] == 'GLD'
+    assert res['momentums']['GLD'] > 0.15 # Approx 20% over 130 days, 126 days should be ~19%
+    assert res['momentums']['TLT'] < -0.05
+    assert res['momentums']['KMLM'] == 0.0
+    assert res['momentums']['SHY'] == 0.0
+    
+    print("test_current_defensive_rotation PASSED")
+
 if __name__ == "__main__":
     test_inverse_leverage_init()
     test_short_math()
     test_default_cash_math()
     test_rolling_inverse()
+    test_current_defensive_rotation()
 
 
 
