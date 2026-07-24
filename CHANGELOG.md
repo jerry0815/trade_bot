@@ -4,6 +4,14 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2026-07-23] — Feature: Dynamic Defensive Rotation Reporting
+
+### New Feature: Dynamic Rotation (`bot.py`, `strat_backtest.py`)
+- **Momentum-Based Selection**: Added a live absolute momentum calculator (`get_current_defensive_rotation`) to evaluate KMLM (Managed Futures), TLT (Long-Term Bonds), GLD (Gold), and SHY (Short-Term Treasuries). It calculates a rolling 126-day (6-month) momentum for each asset.
+- **Discord Bot Update**: Upgraded the bot's "ASSET ALLOCATION" section. The bot now explicitly tells you which defensive asset has the highest momentum (the "winner") and should be held during a sell signal. It displays the live percentages for all four assets, and also explicitly labels `SHY` as `SHY / SGOV` to remind users that ultra-short T-Bills serve the exact same purpose as cash.
+
+---
+
 ## [2026-07-22] — Feature: T+2 Confirmation Delay & Strategy Optimization Analysis
 
 ### New Feature: T+2 Signal Confirmation (`strat_backtest.py`, `bot.py`)

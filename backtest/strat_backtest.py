@@ -115,6 +115,40 @@ def get_cached_signals(ticker="^NDX", sma_window=200):
 
     return SIGNAL_CACHE[cache_key].copy()
 
+def get_current_defensive_rotation(data):
+    """
+    Calculates the live 126-day momentum for KMLM, TLT, GLD, and SHY.
+    Returns a dictionary of the momentums and the current winner.
+    `data` should be a MultiIndex DataFrame from yfinance containing these tickers.
+    """
+    tickers = ["KMLM", "TLT", "GLD", "SHY"]
+    momentums = {}
+    
+    for t in tickers:
+        if isinstance(data.columns, pd.MultiIndex):
+            # Try to get the close price for this ticker
+            if t in data.columns.get_level_values(1):
+                close_series = data.xs(t, axis=1, level=1)['Close'].dropna()
+                if len(close_series) >= 126:
+                    mom = (close_series.iloc[-1] / close_series.iloc[-126]) - 1
+                    momentums[t] = float(mom)
+                else:
+                    momentums[t] = 0.0
+            else:
+                momentums[t] = 0.0
+        else:
+            momentums[t] = 0.0
+            
+    # Determine winner
+    winner = "SHY"
+    if momentums:
+        winner = max(momentums, key=momentums.get)
+        
+    return {
+        "momentums": momentums,
+        "winner": winner
+    }
+
 def cache_clear():
     """
     Clears all in-memory data and signal caches.
