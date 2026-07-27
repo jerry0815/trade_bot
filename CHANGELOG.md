@@ -20,6 +20,15 @@ All notable changes to this project are documented here.
 - **Ablation Study**: Conducted a 20-year ablation study on ATR bounds (14 vs 50) and defensive asset holds (Cash vs KMLM+SGOV). Concluded that T+2 confirmation alone offers the best risk-adjusted performance boost while a 50-day ATR and managed futures blend underperformed the baseline.
 
 ---
+
+## [2026-07-26] — Bot Reporting Enhancements
+
+### Feat: ATR Channel Bounds in Discord Report (`bot.py` & `strat_backtest.py`)
+- **Enhancement:** The daily Discord report now explicitly displays the numerical upper and lower bounds of the ATR channel.
+- Updated `bot.py`'s `format_signal_section` template to format and include `ATR Channel: <lower> - <upper>`.
+
+---
+
 ## [2026-07-22] — Bug Fix: yfinance SQLite Database Locking
 
 ### Bug Fix: `OperationalError` on yfinance Rate-Limit (`strat_backtest.py`)
