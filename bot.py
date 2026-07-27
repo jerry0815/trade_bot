@@ -41,9 +41,13 @@ def generate_market_report(strategy, monitor_ticker="QQQ", leveraged_ticker="TQQ
         trend = stats.get('trend', 'N/A')
         emoji = "🟩" if trend == "BULLISH" else "🟥" if trend == "BEARISH" else "🟨"
         
+        upper = stats.get('upper_bound', 0.0)
+        lower = stats.get('lower_bound', 0.0)
+        
         return (
             f"📈 **{title} ({ticker})**\n"
             f"• Price: {stats['qqq_price']:.2f} | SMA(200): {stats.get('current_sma', 0.0):.2f}\n"
+            f"• ATR Channel: {lower:.2f} - {upper:.2f}\n"
             f"• Status: **{trend}** {emoji}\n"
             f"• Duration: {streak_days} trading days {state_label} (since {state_since})"
         )

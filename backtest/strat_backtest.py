@@ -116,13 +116,17 @@ def get_cached_signals(ticker="^NDX", sma_window=200):
     return SIGNAL_CACHE[cache_key].copy()
 
 def get_defensive_proxy_returns():
-    """Calculates Dynamic Defensive Rotation (126-day Absolute Momentum).
-    Tracks KMLM, TLT, GLD, SHY and rotates into the highest momentum asset.
+    """
+    Constructs the dynamic defensive proxy from KMLM, TLT, GLD, and SHY.
+    It uses a 126-day rolling absolute momentum to pick the 'winner' and splices
+    the daily returns together.
     """
     if "DEFENSIVE_PROXY" in DATA_CACHE:
         return DATA_CACHE["DEFENSIVE_PROXY"]
     
-    tickers = ["KMLM", "RYMTX", "TLT", "VUSTX", "GLD", "SHY"]
+    # We include historical mutual fund proxies to backtest into the 1980s and 1990s
+    # TLT -> VUSTX (1986), GLD -> USERX (1980), SHY -> VFISX (1991), KMLM -> RYMTX (2007)
+    tickers = ["KMLM", "RYMTX", "TLT", "VUSTX", "GLD", "USERX", "SHY", "VFISX"]
     for t in tickers:
         get_cached_data(t)
         
@@ -145,8 +149,8 @@ def get_defensive_proxy_returns():
         
     mom_kmlm = mom_df['KMLM'].fillna(mom_df['RYMTX']).fillna(0.0)
     mom_tlt = mom_df['TLT'].fillna(mom_df['VUSTX']).fillna(0.0)
-    mom_gld = mom_df['GLD'].fillna(0.0)
-    mom_shy = mom_df['SHY'].fillna(0.0)
+    mom_gld = mom_df['GLD'].fillna(mom_df['USERX']).fillna(0.0)
+    mom_shy = mom_df['SHY'].fillna(mom_df['VFISX']).fillna(0.0)
     
     mom_combined = pd.DataFrame({
         'KMLM': mom_kmlm,
@@ -161,8 +165,8 @@ def get_defensive_proxy_returns():
     # Splice daily returns
     ret_kmlm = ret_df['KMLM'].fillna(ret_df['RYMTX']).fillna(0.0)
     ret_tlt = ret_df['TLT'].fillna(ret_df['VUSTX']).fillna(0.0)
-    ret_gld = ret_df['GLD'].fillna(0.0)
-    ret_shy = ret_df['SHY'].fillna(0.0)
+    ret_gld = ret_df['GLD'].fillna(ret_df['USERX']).fillna(0.0)
+    ret_shy = ret_df['SHY'].fillna(ret_df['VFISX']).fillna(0.0)
     
     ret_combined = pd.DataFrame({
         'KMLM': ret_kmlm,
@@ -340,19 +344,21 @@ class SMATrendFollowing(BaseStrategy):
                 lower_bound = sma - (atr * self.atr_multiplier)
                 
             if price > upper_bound:
-                return "BULLISH", sma
+                return "BULLISH", sma, upper_bound, lower_bound
             elif price < lower_bound:
-                return "BEARISH", sma
-            return "NEUTRAL", sma
+                return "BEARISH", sma, upper_bound, lower_bound
+            return "NEUTRAL", sma, upper_bound, lower_bound
 
-        current_trend, current_sma = _get_trend_for_day(-1)
-        previous_trend, _ = _get_trend_for_day(-2)
+        current_trend, current_sma, current_upper, current_lower = _get_trend_for_day(-1)
+        previous_trend, _, _, _ = _get_trend_for_day(-2)
         
         stats.update({
             "current_sma": current_sma,
             "trend": current_trend,
             "previous_trend": previous_trend,
-            "trend_changed": current_trend != previous_trend
+            "trend_changed": current_trend != previous_trend,
+            "upper_bound": current_upper,
+            "lower_bound": current_lower
         })
         
         return stats
