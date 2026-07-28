@@ -4,6 +4,35 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2026-07-28] — Docs: Backtest Results Refresh & Rolling-Window Fix
+
+### Bug Fix: Rolling Windows Shorter Than the Requested Period (`strat_backtest.py`)
+- **Root cause:** `Backtester.run()` only rejected a rolling window if the sliced dataframe was completely empty. A window whose nominal start date predated a ticker's actual data history (e.g. requesting a 26-year window starting 1980 when `^NDX`/`^GSPC` data only goes back to 1985) silently truncated instead of being rejected, mixing 20-26 year windows into statistics that assumed a uniform 26-year period.
+- **Fix:** Added a check in `Backtester.run()` rejecting any window whose actual data span is less than 98% of the requested `period_years`.
+
+### New Script: `backtest/generate_readme_tables.py`
+- Added a script that regenerates the three rolling-backtest tables in `README.md` from the current strategy configuration. Run manually after any change to strategy logic that should be reflected in the published results; writes to `backtest/readme_tables_output.md` (gitignored) for hand-copying into the README.
+
+### Bug Fix: Start-Date Generation & Worst-DD Metric in `generate_readme_tables.py` (post-review)
+A final whole-branch review of the refresh above caught two correctness bugs in the new script before the tables it produced were trustworthy:
+- **Root cause 1 (window dates):** `monthly_start_dates()` hardcoded `start="1980-01-15"` for all three tables and relied solely on `Backtester.run()`'s 98%-tolerance check to filter bad windows. Because that tolerance is *relative* (2% of 26 years ≈ 190 days of slack), it still let windows start up to ~190 days before a ticker's real data existed, contradicting the README's own claim that windows start "from the earliest available data." **Fix:** restored the warmup-aware formula already proven in the notebook (`max(ticker start dates) + 210 calendar days`, matching the 200-day SMA/EMA indicator warmup), driven per-table by the ticker(s) that table actually needs (both base and signal ticker for Table 3's cross-signal case).
+- **Root cause 2 (Worst DD):** `summarize()` computed "Worst DD" as the drawdown *of the worst-TWR window* (`df_res.loc[df_res[ret_col].idxmin(), dd_col]`) rather than the deepest drawdown observed across all windows — silently understating each strategy's true worst drawdown and disagreeing with the engine's own convention in `run_experiment_suite`. **Fix:** compute Worst DD as its own independent minimum (`df_res[dd_col].min()`).
+- Also added: acceptance-rate logging per leverage tier (candidate vs. accepted window counts), a guard against a `None`-crash if every tier returns empty, and made the script's `sys.path`/output-path handling independent of the current working directory.
+- Tables 1-3 were regenerated again after these fixes. Window sets landed back at the historically-expected ranges (Table 1/3: 1986-04-29 to 2000-07-28, 172 windows; Table 2: 1985-07-31 to 2000-07-28, 181 windows) with 100% window acceptance at every tier — confirming the prior 1980-start numbers had been admitting invalid windows.
+
+### Docs: Regenerated README Backtest Tables (`README.md`)
+- Tables 1-3 and their commentary were regenerated using `SMATrendFollowing(sma_window=200, atr_multiplier=2.5, t2_confirmation=True)` — the same configuration `bot.py` runs live — replacing stale numbers from before T+2 confirmation existed, then regenerated again after the window-date and Worst-DD fixes above. Added a note on T+2 confirmation to the "Strategy Logic" section and a third "Triple-Filter" bullet in "Strategy Research & Theoretical Basis" so the documented rules match both the live bot and the backtest.
+- Notable findings from the refresh: with T+2 confirmation, EMA 50/200 now outperforms SMA 200 (ATR x2.5) on the S&P 500 signal (Table 2) — a reversal from the pre-T+2 numbers, where SMA led — and the same EMA lead on average/median/worst-case TWR now also shows up in Table 3 (NDX returns on a GSPC signal) at every leverage tier. On the NASDAQ-100 signal (Table 1), SMA 200 isn't an outright winner — EMA actually posts the higher average TWR at every tier — but SMA's consistently shallower drawdown at every tier is what keeps it the preferred, better risk-adjusted choice there.
+- Softened Table 2's causal claim about the T+2 delay costing SMA more than it saves in avoided whipsaws — it's a plausible read, but the before/after comparison isn't a controlled same-window ablation (the window set itself also changed), so the README now says so explicitly.
+
+### Docs: Notebook Sync Completed (`backtest/TQQQ_Trend_Strategy_Simulator.ipynb`)
+- The initial refresh updated 4 of 5 `SMATrendFollowing()` constructions in the notebook to pass `t2_confirmation=True`; the review caught the 5th (in the "Advanced: Configurable Metric & Tax Comparison" cell), which was fixed along with the hardcoded result-column names in that same cell (the strategy's display name changes to include `[T+2]` once the flag is set).
+
+### Cleanup
+- Removed 5 stale/broken or accidental files that were no longer part of any workflow: `run_rolling_comparison.py`, `test_defensive_options.py`, `test_short_strategy.py`, `analyze_covid.py` (stale scripts), and `bot_history.txt` (an accidental UTF-16 `git log -p` text dump, not a script).
+
+---
+
 ## [2026-07-23] — Feature: Dynamic Defensive Rotation Reporting
 
 ### New Feature: Dynamic Rotation (`bot.py`, `strat_backtest.py`)
