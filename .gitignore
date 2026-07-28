@@ -1,3 +1,8 @@
 # Python cache
 __pycache__/
 *.pyc
+
+# superpowers scratch workspace
+.superpowers/
+
+backtest/readme_tables_output.md
