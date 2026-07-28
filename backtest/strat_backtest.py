@@ -448,6 +448,16 @@ class Backtester:
         if df.empty:
             return None
 
+        # Reject windows where real data doesn't cover the full requested
+        # period (e.g. nominal start_date predates the ticker's actual
+        # history). Without this, a window silently truncates instead of
+        # being rejected, corrupting rolling-window statistics with
+        # shorter, non-comparable periods mixed in as if they were full.
+        actual_span_days = (df.index.max() - df.index.min()).days
+        requested_span_days = (self.end_dt - self.start_dt).days
+        if actual_span_days < requested_span_days * 0.98:
+            return None
+
         # 4. Run the math engine
         results = self._run_portfolio_math(df)
 
