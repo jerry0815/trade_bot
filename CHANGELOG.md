@@ -4,6 +4,36 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2026-07-28] — Feature: Dual-Signal Agreement Strategy, Replaces Table 4
+
+### New Feature: `DualSignalAgreement` Strategy (`strat_backtest.py`)
+- New `BaseStrategy` subclass: computes ^NDX and ^GSPC's SMA+ATR trend
+  signals independently and only flips position when both agree (both
+  bullish -> long, both bearish -> cash); disagreement or either signal
+  sitting in its own neutral zone holds the prior state. Supports the same
+  opt-in `t2_confirmation` parameter as the other strategies.
+- New script `backtest/compare_signal_hybrid.py` compares NDX-own signal,
+  S&P 500 signal, and the dual-signal hybrid, each with T+2 off/on, at the
+  strategy's default ATR (2.5) and 3x leverage, using the same rolling
+  26-year-window methodology as Tables 1-3.
+
+### Table 4 Replaced: Signal Source Comparison (`README.md`)
+- The previous Table 4 (44-variant ATR x signal x T+2 sweep across SMA and
+  EMA, with a mechanically-computed "Best Practice" pick) has been fully
+  replaced with the new signal-source comparison above. The prior sweep's
+  full data (20 SMA rows, 24 EMA rows, and its three analytical findings on
+  ATR-vs-EMA, signal-source robustness, and T+2 behavior) remains available
+  in this file's git history if needed — see the `[2026-07-28] — Feature:
+  Signal & Parameter Sweep + Published Table 4` entry that previously
+  occupied this changelog position.
+- **Finding:** the dual-signal agreement hybrid (T+2 off) outperforms both
+  single-signal setups on every return metric (25.81% Avg TWR vs. 23.53%/
+  23.56%) with the fewest trades (9 vs. 12-15). Adding T+2 on top of the
+  hybrid makes it worse (25.81% -> 24.16% Avg TWR) — the two mechanisms
+  appear to filter the same noise redundantly rather than compounding.
+
+---
+
 ## [2026-07-28] — Feature: Signal & Parameter Sweep + Published Table 4
 
 ### New Feature: `EMACrossover` ATR Buffer & T+2 Confirmation (`strat_backtest.py`)

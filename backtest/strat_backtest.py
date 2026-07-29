@@ -340,6 +340,59 @@ class SMATrendFollowing(BaseStrategy):
 
         return df
 
+class DualSignalAgreement(BaseStrategy):
+    """Requires ^NDX and ^GSPC's independent SMA+ATR trend signals to agree
+    before flipping state — an alternative to T+2's temporal-persistence
+    filter that instead requires cross-signal confirmation. If the two
+    signals disagree, or either sits in its own neutral zone, holds the
+    prior state (mirrors the existing neutral-zone hold behavior)."""
+
+    def __init__(self, sma_window=200, atr_multiplier=2.5, t2_confirmation=False):
+        name = f"Dual-Signal Agreement (ATR x{atr_multiplier})"
+        if t2_confirmation:
+            name += " [T+2]"
+        super().__init__(name=name)
+        self.sma_window = sma_window
+        self.atr_multiplier = atr_multiplier
+        self.t2_confirmation = t2_confirmation
+
+    def _trend_state(self, ticker):
+        sig_df = get_cached_signals(ticker, self.sma_window)
+        upper = sig_df['SMA'] + sig_df['ATR'] * self.atr_multiplier
+        lower = sig_df['SMA'] - sig_df['ATR'] * self.atr_multiplier
+        bullish = sig_df['Close'] > upper
+        bearish = sig_df['Close'] < lower
+        return bullish, bearish
+
+    def _add_indicator_logic(self, df):
+        df = df.copy()
+        ndx_bull, ndx_bear = self._trend_state("^NDX")
+        gspc_bull, gspc_bear = self._trend_state("^GSPC")
+
+        # Align both tickers' independently-computed signals onto this call's
+        # date index — ^NDX and ^GSPC don't necessarily share an identical
+        # trading calendar. ffill carries the last known state across any
+        # gap; fillna(False) covers a leading gap ffill can't fill.
+        ndx_bull = ndx_bull.reindex(df.index).ffill().fillna(False)
+        ndx_bear = ndx_bear.reindex(df.index).ffill().fillna(False)
+        gspc_bull = gspc_bull.reindex(df.index).ffill().fillna(False)
+        gspc_bear = gspc_bear.reindex(df.index).ffill().fillna(False)
+
+        buy_signal = ndx_bull & gspc_bull
+        sell_signal = ndx_bear & gspc_bear
+
+        if self.t2_confirmation:
+            buy_signal = buy_signal.rolling(window=2).min() == 1
+            sell_signal = sell_signal.rolling(window=2).min() == 1
+
+        state = pd.Series(np.nan, index=df.index)
+        state.loc[buy_signal] = 1.0
+        state.loc[sell_signal] = 0.0
+        initial_state_val = 1.0 if bool(ndx_bull.iloc[0] and gspc_bull.iloc[0]) else 0.0
+        raw_signal = state.ffill().fillna(initial_state_val)
+        df['in_market'] = raw_signal.shift(1).fillna(initial_state_val).astype(bool)
+        return df
+
 class VolatilityFilter(BaseStrategy):
     def __init__(self, name="VIX Filter (<25)", vix_threshold=25):
         super().__init__(name)
