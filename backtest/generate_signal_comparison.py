@@ -58,11 +58,12 @@ def build_ema_variants():
     return variants
 
 
-def run_variant(variant):
+def run_variant(variant, start_dates=None):
     strat = variant["strategy"]
     signal_ticker = variant["signal_ticker"]
     tickers = ["^NDX"] if signal_ticker is None else ["^NDX", signal_ticker]
-    start_dates = warmup_aware_start_dates(tickers, PERIOD_YEARS)
+    if start_dates is None:
+        start_dates = warmup_aware_start_dates(tickers, PERIOD_YEARS)
     results = run_experiment_suite(
         configs=[LEVERAGE_CONFIG],
         strategies=[strat],
