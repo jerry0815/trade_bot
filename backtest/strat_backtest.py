@@ -359,10 +359,17 @@ class VolatilityFilter(BaseStrategy):
         return df
 
 class EMACrossover(BaseStrategy):
-    def __init__(self, name="EMA 50/200 Cross", fast_period=50, slow_period=200):
+    def __init__(self, name="EMA 50/200 Cross", fast_period=50, slow_period=200,
+                 t2_confirmation=False, atr_multiplier=None):
+        if atr_multiplier:
+            name += f" (ATR x{atr_multiplier})"
+        if t2_confirmation:
+            name += " [T+2]"
         super().__init__(name)
         self.fast = fast_period
         self.slow = slow_period
+        self.t2_confirmation = t2_confirmation
+        self.atr_multiplier = atr_multiplier
 
     def _add_indicator_logic(self, df):
         df = df.copy()
@@ -370,9 +377,41 @@ class EMACrossover(BaseStrategy):
         fast_ema = df['Close'].ewm(span=self.fast, adjust=False).mean()
         slow_ema = df['Close'].ewm(span=self.slow, adjust=False).mean()
 
-        raw_signal = fast_ema > slow_ema
-        shifted = raw_signal.shift(1)
-        df['in_market'] = np.where(shifted.isna(), False, shifted).astype(bool)
+        if self.atr_multiplier or self.t2_confirmation:
+            # Enhanced path: ATR dead-zone and/or T+2 confirmation requested.
+            # Treat "fast above slow (by more than the ATR band, if set)"
+            # and "fast below slow (by more than the band)" as independent
+            # buy/sell events, each optionally 2-day-confirmed, then
+            # forward-fill state — mirrors SMATrendFollowing's pattern and
+            # gives symmetric confirmation on both entry and exit (a naive
+            # rolling-min on the raw crossover boolean would confirm entry
+            # over 2 days but exit after just 1).
+            if self.atr_multiplier:
+                spread = fast_ema - slow_ema
+                buy_signal = spread > (df['ATR'] * self.atr_multiplier)
+                sell_signal = spread < -(df['ATR'] * self.atr_multiplier)
+            else:
+                buy_signal = fast_ema > slow_ema
+                sell_signal = fast_ema <= slow_ema
+
+            if self.t2_confirmation:
+                buy_signal = buy_signal.rolling(window=2).min() == 1
+                sell_signal = sell_signal.rolling(window=2).min() == 1
+
+            state = pd.Series(np.nan, index=df.index)
+            state.loc[buy_signal] = 1.0
+            state.loc[sell_signal] = 0.0
+            initial_state_val = 1.0 if fast_ema.iloc[0] > slow_ema.iloc[0] else 0.0
+            raw_signal = state.ffill().fillna(initial_state_val)
+            df['in_market'] = raw_signal.shift(1).fillna(initial_state_val).astype(bool)
+        else:
+            # Original path — byte-identical to pre-change behavior when
+            # neither knob is set. Do not merge this with the branch above;
+            # this exact duplication is what guarantees Tables 1-3's
+            # already-published EMA numbers cannot shift.
+            raw_signal = fast_ema > slow_ema
+            shifted = raw_signal.shift(1)
+            df['in_market'] = np.where(shifted.isna(), False, shifted).astype(bool)
         return df
 
 class RSIMeanReversion(BaseStrategy):
@@ -815,3 +854,41 @@ def run_experiment_suite(
                     print(f"  Trades:   Avg {avg_trades:.1f} per period\n")
 
     return all_rolling_results
+
+
+def warmup_aware_start_dates(tickers, period_years):
+    """Generate monthly rolling-window start dates, warmup-aware per ticker.
+
+    The earliest usable start date is the latest of the given tickers'
+    real data start dates, plus a 210-calendar-day offset (~200 trading
+    days) so the 200-day SMA/EMA indicators are fully warmed up before
+    the window begins. `tickers` should include every ticker actually
+    used by the backtest (both base and signal ticker for cross-signal
+    setups) since the window can't start until *all* of them have data.
+    """
+    warmup_start = max(get_cached_data(t).index[0] for t in tickers) + pd.DateOffset(days=210)
+    end_date = pd.Timestamp.today() - pd.DateOffset(years=period_years)
+    return pd.date_range(start=warmup_start, end=end_date, freq=pd.DateOffset(months=1))
+
+
+def summarize_rolling_results(df_res, strategies, metric_label="TWR"):
+    """Summarizes a RollingBacktester result DataFrame into per-strategy stats."""
+    rows = []
+    for strat in strategies:
+        ret_col = f"{strat.name} {metric_label} (%)"
+        dd_col = f"{strat.name} Max DD (%)"
+        trades_col = f"{strat.name} Total Trades"
+        if ret_col not in df_res.columns:
+            continue
+        rows.append({
+            "Strategy": strat.name,
+            "Avg TWR": df_res[ret_col].mean(),
+            "Med TWR": df_res[ret_col].median(),
+            "Worst TWR": df_res[ret_col].min(),
+            # Worst DD must be the deepest drawdown observed across ALL windows
+            # for this strategy — independent of which window had the worst
+            # TWR. Matches this same file's print-summary convention above.
+            "Worst DD": df_res[dd_col].min(),
+            "Avg Trades": df_res[trades_col].mean(),
+        })
+    return rows

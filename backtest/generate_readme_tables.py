@@ -14,13 +14,11 @@ guaranteeing the numbers are exactly what the current strategy produces.
 import sys
 from pathlib import Path
 
-import pandas as pd
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))  # allow running as `python backtest/generate_readme_tables.py` from anywhere
 from backtest.strat_backtest import (
     BuyAndHold, SMATrendFollowing, VolatilityFilter, EMACrossover, RSIMeanReversion,
-    get_cached_data, run_experiment_suite,
+    run_experiment_suite, warmup_aware_start_dates, summarize_rolling_results,
 )
 
 OUTPUT_PATH = REPO_ROOT / "backtest" / "readme_tables_output.md"
@@ -51,45 +49,6 @@ def build_strategies():
     ]
 
 
-def monthly_start_dates(tickers):
-    """Generate monthly rolling-window start dates, warmup-aware per ticker.
-
-    Mirrors the notebook's proven formula (TQQQ_Trend_Strategy_Simulator.ipynb,
-    "Cross-Signal Experiment" cell): the earliest usable start date is the
-    latest of the given tickers' real data start dates, plus a 210-calendar-day
-    offset (~200 trading days) so the 200-day SMA/EMA indicators are fully
-    warmed up before the window begins. `tickers` should include every ticker
-    actually used by the table (both base and signal ticker for cross-signal
-    tables) since the window can't start until *all* of them have data.
-    """
-    warmup_start = max(get_cached_data(t).index[0] for t in tickers) + pd.DateOffset(days=210)
-    end_date = pd.Timestamp.today() - pd.DateOffset(years=PERIOD_YEARS)
-    return pd.date_range(start=warmup_start, end=end_date, freq=pd.DateOffset(months=1))
-
-
-def summarize(df_res, strategies, metric_label="TWR"):
-    rows = []
-    for strat in strategies:
-        ret_col = f"{strat.name} {metric_label} (%)"
-        dd_col = f"{strat.name} Max DD (%)"
-        trades_col = f"{strat.name} Total Trades"
-        if ret_col not in df_res.columns:
-            continue
-        rows.append({
-            "Strategy": strat.name,
-            "Avg TWR": df_res[ret_col].mean(),
-            "Med TWR": df_res[ret_col].median(),
-            "Worst TWR": df_res[ret_col].min(),
-            # Worst DD must be the deepest drawdown observed across ALL windows
-            # for this strategy — independent of which window had the worst
-            # TWR. This matches the engine's own convention in
-            # run_experiment_suite's print-summary path (strat_backtest.py).
-            "Worst DD": df_res[dd_col].min(),
-            "Avg Trades": df_res[trades_col].mean(),
-        })
-    return rows
-
-
 def render_markdown_table(title, date_range_note, leverage_to_rows):
     lines = [f"### {title}", f"*{date_range_note}*", "",
              "| Leverage | Strategy | Avg TWR | Med TWR | Worst TWR | Worst DD | Avg Trades |",
@@ -111,7 +70,7 @@ def run_table(title, base_ticker, signal_ticker=None):
     tickers = [base_ticker] if signal_ticker is None else [base_ticker, signal_ticker]
 
     strategies = build_strategies()
-    start_dates = monthly_start_dates(tickers)
+    start_dates = warmup_aware_start_dates(tickers, PERIOD_YEARS)
     results = run_experiment_suite(
         configs=LEVERAGE_CONFIGS,
         strategies=strategies,
@@ -129,7 +88,7 @@ def run_table(title, base_ticker, signal_ticker=None):
     date_lo = date_hi = None
     for cfg in LEVERAGE_CONFIGS:
         df_res = results[cfg["name"]]
-        leverage_to_rows[cfg["name"]] = summarize(df_res, strategies)
+        leverage_to_rows[cfg["name"]] = summarize_rolling_results(df_res, strategies)
         # Visibility: RollingBacktester.run() silently drops rejected windows
         # (e.g. insufficient data span). Report acceptance rate so a large
         # rejection rate is obvious immediately rather than discovered later
