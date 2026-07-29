@@ -228,3 +228,7 @@ monthly step cadence, not genuine strategy edge.
    intuitively onto "which historical event mattered").
 
 No decision made yet on which to pursue — recorded here so it isn't lost.
+
+A related but distinct question — whether Table 4's parameter selection
+itself overfits — is addressed separately in
+`docs/out-of-sample-validation-2026-07-28.md`.
