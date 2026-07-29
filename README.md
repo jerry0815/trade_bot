@@ -140,6 +140,110 @@ All results below are produced by rolling 26-year backtests stepped forward **mo
 > (not just some, as in Table 1), so EMA keeps the bold as the stronger overall pick on this signal —
 > SMA remains the lower-drawdown alternative for anyone weighting capital preservation more heavily.
 
+---
+
+### Table 4: 3x TQQQ — Signal & Parameter Comparison (SMA vs EMA)
+*^NDX base, 3x leverage only. Sweeps ATR multiplier, signal source (own ^NDX vs S&P 500), and T+2 confirmation to find the best real-world configuration — Tables 1-3 above only ever show each strategy at its default parameters.*
+*Date range: 1986-04-29 to 2000-07-28 (172 rolling windows — confirmed identical for both the own-signal and S&P-500-signal arms of the sweep, matching Table 1's and Table 3's window counts respectively).*
+
+> **Best Practice: SMA 200, ATR x3.0, Signal = Own (^NDX), T+2 = Off — Avg TWR 24.53%, Worst DD -83.08%, Avg Trades 12.** Picked mechanically: highest Avg TWR among the 33 variants remaining after excluding the 11 deepest-drawdown variants (25% — a screen that, in this run, happened not to change the winner: all 11 excluded rows were low-performing EMA variants that were never in contention for best Avg TWR anyway) out of all 44 combinations tested — not a subjective call.
+>
+> **This is a backtested historical result, not `bot.py`'s current live behavior.** Adopting it requires two changes to `bot.py`, not one: (a) retuning the strategy's constructor kwargs from `atr_multiplier=2.5, t2_confirmation=True` (its current live defaults) to `atr_multiplier=3.0, t2_confirmation=False`, **and** (b) switching the primary signal source `bot.py` actually acts on. `bot.py`'s `RECOMMENDED ACTION` (`bot.py:78`) is driven entirely by `stats_sp500` — the S&P 500 signal — not the NASDAQ-100/own signal this pick assumes. (b) is the materially bigger change: it means retargeting which index the bot trend-follows, not just retuning two parameters.
+>
+> **How this compares to what `bot.py` actually runs live:** in this table's own terms, `bot.py`'s live configuration is the **`x2.5 | S&P 500 (^GSPC) | On`** row below — Avg TWR 21.77%, Worst DD -83.40%, Avg Trades 11 (this exactly matches Table 3's SMA row, since Table 3 is this same configuration run at its default ATR). The Best Practice pick beats that real baseline by **+2.76pp Avg TWR** (24.53% vs. 21.77%) with essentially flat drawdown (-83.08% vs. -83.40%, 0.32pp shallower). Note this is *not* the `x2.5 | Own (^NDX) | On` row (23.33%) — that row already assumes the signal-source switch in (b) above and understates the real gap, since `bot.py` does not currently run on the own-signal.
+>
+> **Caveat: this is a single-history, 44-combination grid search over ~172 heavily-overlapping rolling windows, not 172 independent samples** — each window shares most of its 26 years with its neighbors, so the sweep has far less independent evidence behind it than 172 suggests. The winner isn't a clean, isolated peak either: along the Own/Off ATR sweep alone, Avg TWR runs 16.46% (x1.5) -> 22.05% (x2.0) -> 23.53% (x2.5) -> 24.53% (x3.0) -> 23.40% (x3.5) — a large, non-monotonic swing between adjacent parameter values, which is a classic sign of noise rather than a smooth, robust optimum. Read "ATR x3.0" as the parameter that happened to perform best in this particular historical sample, not as a proven "true" optimal band.
+
+#### SMA — ATR & Signal Sweep (3x Leverage)
+
+| ATR | Signal | T+2 | Avg TWR | Med TWR | Worst TWR | Worst DD | Avg Trades |
+| :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: |
+| **x3.0** | **Own (^NDX)** | **Off** | **24.53%** | **25.38%** | **11.46%** | **-83.08%** | **12** |
+| x1.5 | S&P 500 (^GSPC) | On | 24.41% | 24.69% | 11.02% | -81.38% | 17 |
+| x2.5 | S&P 500 (^GSPC) | Off | 23.56% | 23.95% | 12.04% | -83.79% | 12 |
+| x2.5 | Own (^NDX) | Off | 23.53% | 24.25% | 10.53% | -81.38% | 15 |
+| x2.0 | S&P 500 (^GSPC) | Off | 23.51% | 23.21% | 11.72% | -83.79% | 16 |
+| x3.0 | S&P 500 (^GSPC) | Off | 23.46% | 23.59% | 9.79% | -84.97% | 10 |
+| x1.5 | S&P 500 (^GSPC) | Off | 23.46% | 23.62% | 13.21% | -86.93% | 22 |
+| x3.5 | Own (^NDX) | Off | 23.40% | 24.35% | 9.72% | -84.77% | 11 |
+| x2.5 | Own (^NDX) | On | 23.33% | 24.25% | 11.21% | -84.99% | 13 |
+| x3.0 | Own (^NDX) | On | 23.29% | 24.27% | 8.77% | -85.93% | 11 |
+| x3.5 | Own (^NDX) | On | 22.87% | 24.10% | 8.23% | -88.76% | 9 |
+| x2.0 | Own (^NDX) | Off | 22.05% | 22.66% | 9.88% | -80.07% | 17 |
+| x2.0 | Own (^NDX) | On | 21.93% | 23.21% | 8.25% | -85.53% | 16 |
+| x2.5 | S&P 500 (^GSPC) | On | 21.77% | 22.13% | 8.31% | -83.40% | 11 |
+| x2.0 | S&P 500 (^GSPC) | On | 21.74% | 22.41% | 8.98% | -83.40% | 13 |
+| x1.5 | Own (^NDX) | On | 21.42% | 22.55% | 9.58% | -84.50% | 19 |
+| x3.5 | S&P 500 (^GSPC) | Off | 21.01% | 21.29% | 7.27% | -87.82% | 10 |
+| x3.0 | S&P 500 (^GSPC) | On | 20.62% | 20.92% | 6.72% | -87.95% | 10 |
+| x3.5 | S&P 500 (^GSPC) | On | 20.08% | 21.07% | 3.11% | -91.55% | 9 |
+| x1.5 | Own (^NDX) | Off | 16.46% | 16.77% | 7.74% | -91.01% | 23 |
+
+#### EMA — ATR & Signal Sweep (3x Leverage)
+
+| ATR | Signal | T+2 | Avg TWR | Med TWR | Worst TWR | Worst DD | Avg Trades |
+| :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: |
+| None | Own (^NDX) | On | 23.83% | 25.77% | 10.74% | -90.36% | 13 |
+| None | Own (^NDX) | Off | 23.52% | 25.05% | 10.81% | -90.41% | 13 |
+| None | S&P 500 (^GSPC) | Off | 22.93% | 23.50% | 9.02% | -88.61% | 12 |
+| x2.0 | Own (^NDX) | Off | 22.87% | 23.01% | 10.40% | -92.71% | 5 |
+| None | S&P 500 (^GSPC) | On | 22.41% | 22.94% | 8.81% | -87.26% | 12 |
+| x2.0 | S&P 500 (^GSPC) | Off | 22.29% | 22.67% | 6.91% | -96.26% | 5 |
+| x1.5 | Own (^NDX) | On | 21.97% | 21.93% | 9.27% | -93.59% | 6 |
+| x1.5 | Own (^NDX) | Off | 21.92% | 21.95% | 8.76% | -93.69% | 6 |
+| x2.0 | Own (^NDX) | On | 21.71% | 21.75% | 9.17% | -93.86% | 5 |
+| x2.0 | S&P 500 (^GSPC) | On | 21.04% | 21.16% | 5.93% | -96.26% | 5 |
+| x1.5 | S&P 500 (^GSPC) | On | 20.27% | 22.45% | 3.87% | -95.52% | 5 |
+| x1.5 | S&P 500 (^GSPC) | Off | 19.99% | 22.00% | 4.37% | -95.52% | 5 |
+| x3.0 | Own (^NDX) | Off | 17.47% | 17.37% | 4.12% | -98.48% | 4 |
+| x3.0 | Own (^NDX) | On | 17.46% | 17.25% | 3.99% | -98.46% | 4 |
+| x2.5 | Own (^NDX) | On | 17.37% | 17.32% | 5.09% | -98.50% | 4 |
+| x3.5 | Own (^NDX) | Off | 17.21% | 16.80% | 3.83% | -98.39% | 4 |
+| x2.5 | S&P 500 (^GSPC) | On | 15.72% | 14.91% | 2.26% | -98.60% | 4 |
+| x2.5 | S&P 500 (^GSPC) | Off | 15.46% | 14.71% | 1.67% | -98.65% | 4 |
+| x3.0 | S&P 500 (^GSPC) | Off | 14.89% | 14.07% | 1.92% | -98.71% | 4 |
+| x3.5 | Own (^NDX) | On | 14.88% | 14.61% | 2.16% | -98.74% | 4 |
+| x2.5 | Own (^NDX) | Off | 14.85% | 14.80% | 2.93% | -99.14% | 5 |
+| x3.0 | S&P 500 (^GSPC) | On | 13.40% | 12.60% | 0.56% | -99.02% | 4 |
+| x3.5 | S&P 500 (^GSPC) | Off | 7.41% | 6.69% | -5.24% | -99.74% | 4 |
+| x3.5 | S&P 500 (^GSPC) | On | 6.49% | 5.87% | -5.71% | -99.78% | 4 |
+
+> **(1) ATR does not help EMA at 3x — it only hurts.** Every one of the 20 ATR-bearing EMA rows has a
+> deeper worst drawdown than all four ATR-free ("None") rows: the shallowest ATR-row drawdown is -92.71%
+> (x2.0, Own, Off), worse than even the *worst* None-row drawdown of -90.41% (Off) — let alone the best,
+> -87.26% (S&P, On). No ATR row beats the best None row's 23.83% Avg TWR either (the top ATR row reaches
+> only 22.87%). ATR also collapses average trade count from 12-13 down to 4-6, indicating the dead-zone
+> mostly suppresses EMA crossovers entirely rather than filtering noise productively. Part of this is
+> likely a scale-calibration problem rather than proof that ATR dead-zones never work: the multiplier is
+> applied to a structurally much smaller-amplitude quantity for EMA (the fast/slow EMA spread) than for
+> SMA (price minus a single smoothed line), so the same numeric multiplier (x1.5-x3.5) acts as a far more
+> aggressive filter on EMA's spread than on SMA's price-vs-SMA gap — this result says the specific
+> multiplier scale used here is miscalibrated for EMA, not that ATR dead-zones are categorically
+> unworkable for EMA-style crossovers. It's also not a fair "ATR helps SMA" comparison in reverse: every
+> one of the 20 SMA variants uses some ATR multiplier, so this sweep has no ATR-free SMA baseline to
+> confirm ATR actually improves on a no-ATR SMA control — only that ATR is present in the winning SMA row.
+>
+> **(2) The S&P 500 signal does not robustly help either family at 3x — it's mixed for SMA and a clear
+> loss for EMA.** This is a different question from Tables 2-3 (which compared EMA vs. SMA *on* the GSPC
+> signal/asset) — here both strategies stay on ^NDX and only the trend-signal source changes. For SMA,
+> S&P 500 wins only 4 of the 10 matched ATR/T+2 pairs, concentrated at looser ATR (x1.5/Off: 23.46% vs.
+> 16.46% Own; x1.5/On: 24.41% vs. 21.42% Own; x2.0/Off: 23.51% vs. 22.05% Own; x2.5/Off: 23.56% vs. 23.53%
+> Own, a virtual tie) — Own (^NDX) wins the other 6, especially at ATR >= 3.0 with T+2 On (x3.0/On: 23.29%
+> Own vs. 20.62% S&P). For EMA, Own signal wins 11 of 12 matched pairs, often by wide margins at higher
+> ATR (x3.5/Off: 17.21% Own vs. 7.41% S&P) — S&P only wins once, narrowly (x2.5/Off: 15.46% vs. 14.85%).
+>
+> **(3) T+2 confirmation is a net negative for SMA at 3x and a coin flip for EMA — no single setting wins
+> across the board.** For SMA, T+2 raises Avg TWR in only 2 of 10 matched ATR/signal pairs — both at the
+> tightest ATR band (x1.5/Own: +4.96pp, 16.46% -> 21.42%; x1.5/S&P: +0.95pp, 23.46% -> 24.41%) — and lowers
+> it in the other 8, up to -2.84pp (x3.0/S&P: 23.46% Off vs. 20.62% On). The Best Practice pick itself runs
+> T+2=Off. For EMA, T+2 helps in 5 of 12 pairs (e.g. x2.5/Own: +2.52pp, 14.85% -> 17.37%) and hurts in the
+> other 7 (e.g. x3.5/Own: -2.33pp, 17.21% -> 14.88%) — Tables 1-3's **SMA** rows all run `bot.py`'s T+2-on
+> configuration, but their EMA rows do not: `EMACrossover` had no `t2_confirmation` parameter at all before
+> this effort added it, so every EMA row in Tables 1-3 was already implicitly T+2 off (Table 1's EMA row
+> and Table 3's EMA row match this table's `None | Own (^NDX) | Off` and `None | S&P 500 (^GSPC) | Off`
+> rows exactly). This sweep shows that at 3x, T+2's real-world value depends heavily on the ATR band and
+> signal source it's paired with, not a universal improvement — true for SMA, and (once EMA's actual
+> baseline is accounted for) for EMA too.
 
 ---
 

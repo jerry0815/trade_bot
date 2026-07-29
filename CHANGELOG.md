@@ -4,6 +4,52 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2026-07-28] — Feature: Signal & Parameter Sweep + Published Table 4
+
+### New Feature: `EMACrossover` ATR Buffer & T+2 Confirmation (`strat_backtest.py`)
+- Added opt-in `atr_multiplier` and `t2_confirmation` parameters to `EMACrossover`, mirroring the options
+  `SMATrendFollowing` already had. Both default to off (`atr_multiplier=None`, `t2_confirmation=False`),
+  so existing `EMACrossover()` callers — including Tables 1-3's default rows and `bot.py` — are unaffected.
+  When `atr_multiplier` is set, EMA crossovers must clear an ATR-scaled dead-zone around the crossover
+  point before a state change fires; `t2_confirmation` behaves identically to `SMATrendFollowing`'s.
+
+### Refactor: Shared Rolling-Backtest Helpers (`strat_backtest.py`)
+- Extracted `warmup_aware_start_dates(tickers, period_years)` and
+  `summarize_rolling_results(df_res, strategies, metric_label="TWR")` out of `generate_readme_tables.py`
+  into `strat_backtest.py` so both the existing table generator and the new sweep script below share one
+  implementation instead of duplicating the warmup-date and summary-statistics logic.
+
+### New Script: `backtest/generate_signal_comparison.py`
+- Added a script that runs a 44-variant rolling-26-year sweep at 3x leverage on `^NDX`: 20 SMA
+  combinations (ATR in {1.5, 2.0, 2.5, 3.0, 3.5} x signal in {own ^NDX, S&P 500} x T+2 in {off, on}) and
+  24 EMA combinations (the same grid plus a no-ATR baseline). Mechanically picks a "best real-world
+  practice" combination as the highest Avg TWR among the 33 variants remaining after excluding the 11
+  deepest-drawdown variants (worst quartile) out of all 44 — a rule, not a subjective call. Writes both
+  sweep tables and the pick to `backtest/signal_comparison_output.md` (gitignored) for hand-copying into
+  the README, following the same generate-then-transcribe pattern as `generate_readme_tables.py`.
+
+### Docs: Published README Table 4 (`README.md`)
+- Added "Table 4: 3x TQQQ — Signal & Parameter Comparison (SMA vs EMA)", fixing leverage at 3x and
+  sweeping the parameters Tables 1-3 never varied. The mechanical Best Practice pick: **SMA 200, ATR x3.0,
+  Signal = Own (^NDX), T+2 = Off** — 24.53% Avg TWR, -83.08% Worst DD, 12 Avg Trades. `bot.py`'s actual
+  live configuration is `SMATrendFollowing(sma_window=200, t2_confirmation=True)` (default
+  `atr_multiplier=2.5`) with `RECOMMENDED ACTION` driven entirely by the S&P 500 signal
+  (`stats_sp500`, `bot.py:78`) — i.e. the **`x2.5 | S&P 500 (^GSPC) | On`** row, 21.77% Avg TWR,
+  -83.40% Worst DD. The Best Practice pick beats that real baseline by +2.76pp Avg TWR with an
+  essentially flat Worst DD (-0.32pp shallower). An earlier draft of this entry compared against the
+  `x2.5 | Own (^NDX) | On` row (23.33%) instead — that was the wrong baseline, since it silently assumes
+  a signal-source switch `bot.py` doesn't currently make. Adopting the Best Practice pick would require
+  switching `bot.py`'s primary signal source from S&P 500 to NASDAQ-100/own-signal, not just retuning
+  `atr_multiplier`/`t2_confirmation`.
+- Key findings from the sweep, cited with specific row numbers in the table's commentary: an ATR dead-zone
+  never helps EMA at 3x (every ATR-bearing EMA row has a deeper drawdown than every ATR-free row, and none
+  beats the ATR-free rows' best Avg TWR); the S&P 500 signal isn't a robust win for either family holding
+  ^NDX as the traded asset (SMA splits 4-6 in favor of the own-signal, EMA favors the own signal 11 of 12
+  matched pairs); and T+2 confirmation is a net negative for SMA at 3x (helps only 2 of 10 matched pairs,
+  both at the tightest ATR band) and roughly a coin flip for EMA (5 of 12 pairs).
+
+---
+
 ## [2026-07-28] — Docs: Backtest Results Refresh & Rolling-Window Fix
 
 ### Bug Fix: Rolling Windows Shorter Than the Requested Period (`strat_backtest.py`)
