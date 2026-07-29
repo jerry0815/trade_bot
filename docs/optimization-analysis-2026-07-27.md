@@ -193,3 +193,38 @@ concrete evidence base for item 4's plan.
 - Tax lot accounting (`backtest/strat_backtest.py:552-585`) — single-lot
   FIFO is correct for this engine's one-position-at-a-time model; no
   partial-fill or multi-lot scenario exists to get wrong.
+
+---
+
+## 7. Addendum (2026-07-28): Overlapping-window statistical bias — future work
+
+Flagged during review of Table 4's 44-variant sweep, not part of the
+original 2026-07-27 audit above. Applies to every rolling-window table in
+this project (Tables 1-4): `warmup_aware_start_dates()` steps candidate
+start dates **monthly** over a **26-year** window, so adjacent windows
+share all but one month of history. The ~172-193 "windows" reported per
+table are not independent samples — the same handful of real market
+events (the dot-com crash, 2008 GFC, COVID crash, 2022 bear market) each
+appear in dozens of overlapping windows and get counted that many times
+in the Avg/Med TWR statistics. This can make average/median figures look
+more statistically solid than they are, and risks over-weighting whichever
+regime happens to fall in more of the sampled windows purely due to the
+monthly step cadence, not genuine strategy edge.
+
+**Two candidate fixes, not yet designed or implemented:**
+1. **Regime-segmented reporting** — report results broken out by named
+   historical regime (dot-com, GFC, COVID, 2022, etc.) alongside the
+   pooled rolling-window average, so a reader can see how many genuinely
+   independent regimes the strategy has actually been tested against.
+   Simpler to implement; the tradeoff is fewer independent data points to
+   compare (a handful of regimes vs. "172 windows"), which is a more
+   honest picture but a less statistically powerful one on its face.
+2. **Block bootstrap resampling** — resample the underlying daily return
+   series in autocorrelation-preserving blocks to construct a proper
+   confidence interval that accounts for the true (much smaller) effective
+   sample size, rather than treating each rolling window as an independent
+   observation. More statistically rigorous; more implementation work
+   (would need a documented block-length choice and doesn't map as
+   intuitively onto "which historical event mattered").
+
+No decision made yet on which to pursue — recorded here so it isn't lost.
