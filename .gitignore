@@ -6,3 +6,4 @@ __pycache__/
 .superpowers/
 
 backtest/readme_tables_output.md
+backtest/signal_comparison_output.md
