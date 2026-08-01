@@ -247,16 +247,52 @@ class BuyAndHold(BaseStrategy):
         return df
 
 class SMATrendFollowing(BaseStrategy):
-    def __init__(self, sma_window=200, buffer_pct=None, atr_multiplier=2.5, t2_confirmation=False):
+    def __init__(self, sma_window=200, buffer_pct=None, atr_multiplier=2.5, t2_confirmation=False,
+                 vix_threshold=None, atr_spike_multiplier=None, atr_spike_lookback=60,
+                 sma_slope_lookback=None):
         # We handle naming and initialization cleanly
         name = f"SMA {sma_window} - " + (f"Static {buffer_pct*100}% Buffer" if buffer_pct else f"ATR Buffer (x{atr_multiplier})")
         if t2_confirmation:
             name += " [T+2]"
+        if vix_threshold:
+            name += f" [VIX>{vix_threshold} bypass]"
+        if atr_spike_multiplier:
+            name += f" [ATR-spike x{atr_spike_multiplier} bypass]"
+        if sma_slope_lookback:
+            name += f" [SMA-slope {sma_slope_lookback}d re-entry filter]"
         super().__init__(name=name)
         self.sma_window = sma_window
         self.buffer_pct = buffer_pct
         self.atr_multiplier = atr_multiplier
         self.t2_confirmation = t2_confirmation
+        # When set, T+2 confirmation is bypassed (signal acts same-day) on any
+        # day the VIX close is above this threshold — the idea being that in a
+        # genuine fast/severe selloff the directional signal isn't ambiguous,
+        # so the 2-day confirmation delay costs more than it filters. Has no
+        # effect unless t2_confirmation=True (nothing to bypass otherwise).
+        # VIX data only exists from 1990 onward (see strat_backtest.py's
+        # ^VIX cache) — for any date before that, df['VIX'] is NaN and the
+        # comparison below is always False, so the bypass silently never
+        # fires for pre-1990 history rather than erroring.
+        self.vix_threshold = vix_threshold
+        # Same bypass idea as vix_threshold, but keyed to realized volatility
+        # computed from price data (ATR as a % of Close, relative to its own
+        # trailing average) instead of the VIX index — this has full
+        # historical coverage back to the start of the data (no 1990 floor),
+        # so it can react to pre-VIX events like Black Monday 1987. Also has
+        # no effect unless t2_confirmation=True. If both vix_threshold and
+        # atr_spike_multiplier are set, either condition can trigger the
+        # bypass on a given day (logical OR).
+        self.atr_spike_multiplier = atr_spike_multiplier
+        self.atr_spike_lookback = atr_spike_lookback
+        # When set, a re-entry (buy) signal only fires if the SMA itself has
+        # risen over the last N days — filters out re-entries during a bear-
+        # market rally where price briefly pokes above the ATR band while the
+        # underlying 200-day trend is still declining (dot-com's repeated
+        # whipsaw losses being the motivating case). Only affects entries,
+        # not exits — a declining SMA shouldn't make the strategy slower to
+        # get OUT, only slower to get back IN on an unconfirmed reversal.
+        self.sma_slope_lookback = sma_slope_lookback
 
     def get_live_stats(self, monitor_ticker="QQQ", leveraged_ticker="TQQQ", data=None):
         # 1. Get the base data (pass shared pre-downloaded data if provided)
@@ -314,12 +350,49 @@ class SMATrendFollowing(BaseStrategy):
             lower_bound = df['SMA'] - (df['ATR'] * self.atr_multiplier)
 
         # 2. Identify the exact days the price breaks the bounds
-        buy_signal = df['Close'] > upper_bound
-        sell_signal = df['Close'] < lower_bound
+        buy_signal_raw = df['Close'] > upper_bound
+        sell_signal_raw = df['Close'] < lower_bound
+
+        if self.sma_slope_lookback:
+            # A rising SMA is required for a re-entry to count at all — this
+            # gates buy_signal_raw itself, before T+2/volatility-bypass logic
+            # ever sees it, so a filtered-out re-entry can't be confirmed or
+            # bypassed into an actual entry either.
+            sma_rising = df['SMA'] > df['SMA'].shift(self.sma_slope_lookback)
+            buy_signal_raw = buy_signal_raw & sma_rising.fillna(False)
 
         if self.t2_confirmation:
-            buy_signal = buy_signal.rolling(window=2).min() == 1
-            sell_signal = sell_signal.rolling(window=2).min() == 1
+            buy_signal_confirmed = buy_signal_raw.rolling(window=2).min() == 1
+            sell_signal_confirmed = sell_signal_raw.rolling(window=2).min() == 1
+
+            high_vol = None
+            if self.vix_threshold:
+                high_vol = df['VIX'] > self.vix_threshold
+            if self.atr_spike_multiplier:
+                atr_pct = df['ATR'] / df['Close']
+                atr_pct_baseline = atr_pct.rolling(window=self.atr_spike_lookback, min_periods=20).mean()
+                atr_spike = atr_pct > (atr_pct_baseline * self.atr_spike_multiplier)
+                high_vol = atr_spike if high_vol is None else (high_vol | atr_spike)
+
+            if high_vol is not None:
+                # High-volatility days (by whichever measure(s) are enabled)
+                # act on the raw (same-day) signal; everything else still
+                # requires the normal 2-day confirmation.
+                high_vol = high_vol.fillna(False)
+                buy_signal = pd.Series(
+                    np.where(high_vol, buy_signal_raw, buy_signal_confirmed), index=df.index
+                ).astype(bool)
+                sell_signal = pd.Series(
+                    np.where(high_vol, sell_signal_raw, sell_signal_confirmed), index=df.index
+                ).astype(bool)
+            else:
+                # Original path — byte-identical to pre-change behavior when
+                # neither bypass is configured.
+                buy_signal = buy_signal_confirmed
+                sell_signal = sell_signal_confirmed
+        else:
+            buy_signal = buy_signal_raw
+            sell_signal = sell_signal_raw
 
         # 3. Create a state tracker using np.nan (float) to avoid object dtype warnings
         state = pd.Series(np.nan, index=df.index)
@@ -650,6 +723,7 @@ class Backtester:
         trade_log      = []
         entry_idx      = -1       # array index of last entry (-1 = no open position)
         cost_basis_val = 0.0
+        portfolio_values = np.empty(n)  # daily equity curve, for drawdown-episode analysis
 
         for i in range(n):
             # Capture cost basis BEFORE applying today's return (entry day only)
@@ -699,6 +773,8 @@ class Backtester:
             drawdown = (portfolio_value - peak_value) / peak_value
             if drawdown < max_drawdown: max_drawdown = drawdown
 
+            portfolio_values[i] = portfolio_value
+
         result = {
             "final_value"    : portfolio_value,
             "total_invested" : total_principal,
@@ -709,6 +785,9 @@ class Backtester:
             "total_roi"      : ((portfolio_value - total_principal) / total_principal) * 100,
             "min_value"      : min_value,
             "trade_log"      : trade_log,
+            # Daily equity curve, for drawdown-episode analysis (peak-to-trough
+            # periods) that the single max_drawdown scalar above can't show.
+            "equity_curve"   : pd.Series(portfolio_values, index=dates),
         }
         if self.apply_tax:
             result["total_tax_paid"] = total_tax_paid
