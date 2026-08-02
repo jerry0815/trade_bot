@@ -33,12 +33,19 @@ SIGNAL_TICKER = "^GSPC"
 CONFIG = {"name": "3x", "leverage": 3, "expense": 0.0095}
 PERIOD_YEARS = 26
 
-CANDIDATE_PCT = 0.08      # from Task 3 Step 2 (revised): runner-up, chosen over the raw top
-                          # candidate (5%, 60d, +64.13pp) which showed an 8.6x non-monotonic
-                          # cliff vs. its (5%, 40d)=+7.44pp cooldown-neighbor -- the same
-                          # fragility signature rejected for atr_spike_multiplier in Phase 6.
-                          # (8%, 60d) neighbors smoothly with (8%, 40d)=+37.29pp (1.02x ratio).
-CANDIDATE_COOLDOWN = 60   # from Task 3 Step 2 (unchanged)
+CANDIDATE_PCT = 0.08      # Re-derived from scratch against the corrected sweep (after the
+                          # one-day-lookahead bug in _apply_trailing_stop was fixed). The
+                          # mechanical top pick is again (5%, 60d, +53.62pp) and is again
+                          # rejected by hand: its (5%, 40d) cooldown-neighbor scores only
+                          # +1.77pp, a 30x non-monotonic cliff (the pre-fix numbers showed
+                          # 8.6x here) -- the same fragility signature rejected for
+                          # atr_spike_multiplier in Phase 6. (7%, 60d, +41.70pp) is rejected
+                          # for the same reason (26x vs. (7%, 40d)=+1.57pp). (8%, 60d,
+                          # +32.14pp) is the only survivor whose neighborhood is smooth on
+                          # BOTH axes: (8%, 40d)=+21.65pp (1.48x) and (7%, 60d)=+41.70pp
+                          # (0.77x) are both comparable in magnitude, not cliffs.
+CANDIDATE_COOLDOWN = 60   # same pair as the pre-fix analysis happened to land on, but
+                          # re-derived, not carried over
 
 WORST_BAND_START = pd.Timestamp("1998-01-01")
 WORST_BAND_END = pd.Timestamp("2001-12-31")
@@ -64,7 +71,10 @@ if __name__ == "__main__":
 
     summary = summarize_rolling_results(df_res, strategies)
 
-    lines = [f"### Trailing-Stop Rolling-Window Validation ({len(start_dates)} windows, ^NDX/3x, S&P signal)", "",
+    # Report the number of windows that actually produced results, not the
+    # number requested: run_experiment_suite drops windows with no usable data,
+    # so len(start_dates) would silently overstate the count.
+    lines = [f"### Trailing-Stop Rolling-Window Validation ({len(df_res)} windows, ^NDX/3x, S&P signal)", "",
              "| Strategy | Avg TWR | Med TWR | Worst TWR | Worst DD | Avg Trades |",
              "| :--- | ---: | ---: | ---: | ---: | ---: |"]
     for s in summary:
