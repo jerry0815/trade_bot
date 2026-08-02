@@ -261,7 +261,10 @@ class SMATrendFollowing(BaseStrategy):
         if sma_slope_lookback:
             name += f" [SMA-slope {sma_slope_lookback}d re-entry filter]"
         if trailing_stop_pct:
-            name += f" [Trailing Stop {trailing_stop_pct*100:.0f}%, cooldown {trailing_stop_cooldown_days}d]"
+            # One decimal place, not zero: at .0f two distinct stops (e.g. 0.075
+            # and 0.08) would render to the same string and silently collide in
+            # RollingBacktester's strategy-name-keyed columns.
+            name += f" [Trailing Stop {trailing_stop_pct*100:.1f}%, cooldown {trailing_stop_cooldown_days}d]"
         super().__init__(name=name)
         self.sma_window = sma_window
         self.buffer_pct = buffer_pct
@@ -450,9 +453,41 @@ class SMATrendFollowing(BaseStrategy):
         forces in_market False for the next trailing_stop_cooldown_days
         trading days even if the trend signal says in-market again; normal
         trend-driven logic resumes once the cooldown elapses.
+
+        Lookahead-free by construction: in_market[i] is already the
+        EXECUTION-day column (step 7 above applies raw_signal.shift(1)), and
+        _run_portfolio_math sells an exit day at TODAY'S OPEN. So the decision
+        for day i may only use information available before day i's open —
+        i.e. close[i-1], never close[i]. All three reads below (peak
+        initialization on a fresh entry, the running peak update, and the
+        breach comparison) therefore use the SAME lagged close series; mixing
+        a lagged peak with an unlagged breach check (or vice versa) would
+        reintroduce the same one-day lookahead in partial form.
+
+        Precedence: when a trend-signal exit and a stop breach would both
+        apply on the same day, the trend-signal exit wins (the `not desired`
+        branch is checked first) and does NOT start a cooldown — only a
+        stop-triggered exit does. This is deliberate: the cooldown exists to
+        stop the stop's own re-entry whipsaw, and a normal trend exit already
+        has the band/T+2 logic governing when it re-enters.
         """
         trend_in_market = df['in_market'].to_numpy()
+        # Lagged close: close_lagged[i] is the close of day i-1, the most
+        # recent close knowable before day i's open. Row 0 has no prior close;
+        # it is seeded with close[0] so a fresh entry on row 0 initializes the
+        # peak sanely. No breach check can fire at i == 0 regardless (was_in
+        # starts False, so row 0 can only take the fresh-entry or flat branch),
+        # so the seed can never manufacture a spurious row-0 stop.
+        # NaN note: a NaN close propagates to peak/breach comparisons as False,
+        # so a mid-trade NaN is simply ignored day-to-day. A NaN landing on a
+        # fresh-entry day would make peak NaN for the rest of that trade
+        # (no breach could ever fire). Unreachable with this project's ^NDX /
+        # ^GSPC sources, so no defensive code — flagged only so a future data
+        # source with gaps doesn't hit this silently.
         close = df['Close'].to_numpy()
+        close_lagged = np.roll(close, 1)
+        if len(close_lagged):
+            close_lagged[0] = close[0]
         n = len(df)
         final = np.zeros(n, dtype=bool)
 
@@ -475,15 +510,17 @@ class SMATrendFollowing(BaseStrategy):
 
             if not was_in:
                 # Fresh entry (first entry, or re-entry after a cash
-                # period/cooldown): peak starts at today's close.
-                peak = close[i]
+                # period/cooldown): peak starts at the last close knowable
+                # before this entry executes — yesterday's close.
+                peak = close_lagged[i]
                 was_in = True
                 final[i] = True
                 continue
 
-            # Already holding: update the peak, then check the stop.
-            peak = max(peak, close[i])
-            if close[i] < peak * (1 - self.trailing_stop_pct):
+            # Already holding: update the peak, then check the stop. Both read
+            # yesterday's close (see the lookahead note in the docstring).
+            peak = max(peak, close_lagged[i])
+            if close_lagged[i] < peak * (1 - self.trailing_stop_pct):
                 final[i] = False
                 was_in = False
                 cooldown = self.trailing_stop_cooldown_days
