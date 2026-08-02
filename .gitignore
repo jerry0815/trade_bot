@@ -13,3 +13,4 @@ backtest/event_leverage_output.md
 backtest/trailing_stop_sweep_output.md
 backtest/trailing_stop_validate_output.md
 backtest/trailing_stop_out_of_sample_output.md
+backtest/trailing_stop_tax_aware_out_of_sample_output.md
