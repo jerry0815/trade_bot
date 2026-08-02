@@ -10,3 +10,4 @@ backtest/signal_comparison_output.md
 backtest/out_of_sample_output.md
 backtest/signal_hybrid_output.md
 backtest/event_leverage_output.md
+backtest/trailing_stop_sweep_output.md
