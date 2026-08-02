@@ -42,19 +42,24 @@ crises per combination (`backtest/trailing_stop_sweep_output.md`).
 
 Applying the mechanical candidate-selection procedure (Task 3 Step 2 of
 `docs/superpowers/plans/2026-08-01-trailing-stop-loss.md`) to the corrected
-Dot-com rows, exactly four combinations clear the `>= 2.0pp` candidate bar,
-and all four formally clear the non-fragility bar (`>= 1.0pp` on at least one
-pct-neighbor and one cooldown-neighbor):
+Dot-com rows, **five** combinations clear the `>= 2.0pp` candidate bar:
+`(5%,10d)=+4.81`, `(5%,60d)=+53.62`, `(7%,60d)=+41.70`, `(8%,40d)=+21.65`, and
+`(8%,60d)=+32.14`. One of those five, `(5%, 10d)`, fails the non-fragility
+check at the next step — both its neighbors are negative (`(7%,10d)=-1.78`,
+`(5%,20d)=-4.38`) — leaving **four** non-fragile survivors:
 
 | Candidate | Dot-com Improvement (pp) | Cooldown-neighbor | Pct-neighbor(s) | Neighborhood shape |
 | :--- | ---: | :--- | :--- | :--- |
 | 5%, 60d | **+53.62** | (5%, 40d) = +1.77 | (7%, 60d) = +41.70 | **30x cliff** on cooldown axis |
 | 7%, 60d | +41.70 | (7%, 40d) = +1.57 | (5%/8%, 60d) = +53.62 / +32.14 | **26x cliff** on cooldown axis |
-| 8%, 60d | +32.14 | (8%, 40d) = +21.65 (1.48x) | (7%, 60d) = +41.70 (0.77x) | smooth on **both** axes |
-| 8%, 40d | +21.65 | (8%, 60d) = +32.14 (1.48x) | (7%, 40d) = +1.57 | **14x cliff** on pct axis |
+| 8%, 60d | +32.14 | (8%, 40d) = +21.65 (1.48x) | (7%, 60d) = +41.70 (0.77x); (10%, 60d) = **-5.02** | smooth toward 7%, **reverses sign** toward 10% |
+| 8%, 40d | +21.65 | (8%, 60d) = +32.14 (1.48x) | (7%, 40d) = +1.57; (10%, 40d) = -2.83 | **14x cliff** on pct axis (toward 7%); also reverses toward 10% |
 
-The mechanically top-ranked combination is `(5%, 60d)` at **+53.62pp**, the
-single highest value anywhere in the 28×5 sweep. **It was rejected by hand**,
+The mechanically top-ranked combination is `(5%, 60d)` at **+53.62pp** — the
+highest Dot-com value in the sweep, though not the single highest value in
+the full 28×5×event grid: Black Monday 1987 reaches **+56.02pp** at three
+different 5%-stop combinations (see the per-event table below). **It was
+rejected by hand**,
 for the same reason the pre-fix analysis rejected the same combination: its
 *cooldown*-neighbor `(5%, 40d)` scores only **+1.77pp**, a **30x** collapse
 between adjacent cooldown values at the same stop width. That is the
@@ -68,12 +73,15 @@ identical grounds (26x).
 
 **The candidate carried forward is `(pct=8%, cooldown=60d)`**, Dot-com
 `Improvement (pp)` **+32.14** — lower than the two rejected headline numbers,
-but the only survivor whose neighborhood is smooth along *both* grid axes:
-`(8%, 40d)` = +21.65pp (1.48x) and `(7%, 60d)` = +41.70pp (0.77x) are both the
-same order of magnitude as it. The `60d` cooldown row as a whole declines
-smoothly across stop width (+53.62 → +41.70 → +32.14 at 5/7/8%), which is a
-coherent gradient rather than an isolated spike; the cliffs all live on the
-cooldown axis at the tighter stops.
+but the only survivor with a same-order-of-magnitude neighbor on both grid
+axes in at least one direction: `(8%, 40d)` = +21.65pp (1.48x) and
+`(7%, 60d)` = +41.70pp (0.77x). The `60d` cooldown row as a whole declines
+smoothly across stop width (+53.62 → +41.70 → +32.14 at 5/7/8%), a coherent
+gradient rather than an isolated spike; the cliffs among the rejected
+candidates all live on the cooldown axis at the tighter stops. This is not
+uniformly smooth, though: moving one step further, to `(10%, 60d)`, the
+effect reverses sign entirely (-5.02pp) — the improvement is real in a
+neighborhood around `(8%, 60d)`, not everywhere nearby.
 
 This is the same `(8%, 60d)` pair the pre-fix analysis landed on, but it was
 re-derived from scratch against the corrected sweep rather than carried over —
