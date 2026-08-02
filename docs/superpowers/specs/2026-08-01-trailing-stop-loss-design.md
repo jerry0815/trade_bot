@@ -105,11 +105,27 @@ signal-side, same as the three existing experimental params.
 ### 2. Event-relative sweep script
 
 Extend or duplicate `backtest/event_leverage_comparison.py`'s pattern:
-sweep `trailing_stop_pct ∈ {10%, 15%, 20%, 25%, 30%}` ×
-`trailing_stop_cooldown_days ∈ {10, 20, 40, 60}` (20 combinations) at the
-NDX/3x baseline (the config the dot-com evidence above was computed on),
-report event-relative decline for all 5 crises per combination. Look
-specifically for:
+sweep `trailing_stop_pct` × `trailing_stop_cooldown_days` at the NDX/3x
+baseline (the config the dot-com evidence above was computed on), report
+event-relative decline for all 5 crises per combination. Look specifically
+for:
+
+**Addendum (2026-08-01, discovered while moving to the implementation
+plan):** the "Evidence" section above measured trigger points against the
+*leveraged 3x equity curve*. Re-measured against the actual design basis
+(underlying `^GSPC` Close, per the Measurement-basis decision below), the
+dot-com hold's peak-to-trough was only **~-13%** (peak 1527.46 on
+2000-03-24 → trough 1329.78) — a stop in the original 15-30% range would
+**never trigger at all** in this trade; leverage was tripling the apparent
+drawdown. The real trigger range on the underlying-price basis is roughly
+**5-12%** (a -10% stop first fires 2000-04-14 at close 1356.56, a modest
+save vs. the eventual signal-driven exit at 1329.78 — real, but far less
+dramatic than the equity-curve view implied). The sweep grid is corrected
+accordingly: `trailing_stop_pct ∈ {5%, 7%, 8%, 10%, 12%, 15%, 20%}` ×
+`trailing_stop_cooldown_days ∈ {10, 20, 40, 60}` (28 combinations) — wide
+enough to see the effect taper off past ~12-13% (expected, a hard ceiling
+from this trade's actual shape, not a fragility cliff) while still
+covering the range with a real effect.
 - Whether dot-com's decline actually shrinks materially.
 - Non-monotonic cliffs between adjacent parameter values — the same
   fragility signature Phase 6's `atr_spike_multiplier` showed (a huge win
