@@ -142,12 +142,25 @@ Avg/Med/Worst TWR and Worst DD impact, not just the one event.
 
 ### 4. Event-specificity segmentation check
 
-Same check that caught `vix_threshold` being ~COVID-specific (Phase 5):
-split the 172 rolling windows into dot-com-containing vs. not (windows
-whose 26-year span includes 2000-2002), compare average TWR improvement
-between the two groups. Report honestly whether the benefit is general or
-concentrated in one historical event — this is a finding to surface either
-way, not a gate that blocks writing it up.
+Same motivation as the check that caught `vix_threshold` being
+~COVID-specific (Phase 5), but **the COVID split mechanism doesn't
+transfer directly**: verified while writing the implementation plan that
+all 172 rolling windows span 26 years starting between 1986-04-29 and
+2000-07-28, so **every single window's span already includes 2000-2002**
+— there is no "dot-com-containing vs. not" split to make; COVID (2020) is
+recent enough that only newer-start windows include it, but dot-com (2000)
+is old enough that it's inside all of them.
+
+Corrected check, using the actual asymmetry Phase 4 already found (the
+worst-10 rolling windows for the live SMA config all land in 1999-2000 —
+i.e. windows whose *start* lands right before/at the dot-com top, where a
+freshly-opened 3x position has no accumulated cushion): segment the 172
+windows by **start date** into "starts 1998-01-01 through 2001-12-31"
+(the zone that produces the worst historical windows) vs. all other
+starts, and compare average TWR / Worst DD improvement between the two
+groups. Report honestly whether the benefit concentrates in the
+already-known-worst start-date band or is general — this is a finding to
+surface either way, not a gate that blocks writing it up.
 
 ## Explicitly out of scope
 
