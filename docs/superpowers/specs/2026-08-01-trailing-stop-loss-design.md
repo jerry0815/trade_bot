@@ -1,0 +1,180 @@
+# Trailing Stop-Loss (Open-Position Risk Management) Design
+
+**Status:** Approved by user 2026-08-01. Ready for implementation planning.
+
+## Problem
+
+`docs/session-handover-2026-08-01.md` (Phase 4/7) established that the
+strategy's worst episode — the dot-com crash, -83.39% peak-to-trough,
+~13.5 years to recover — is **not** a re-entry/whipsaw problem. The trade
+log for 1999-2003 shows exactly one position held through the whole decline
+(entry 1999-11-12, exit 2000-10-12, 335 days), correctly preceded and
+followed by correct cash periods. Phase 7's SMA-slope re-entry filter,
+built on the whipsaw hypothesis, had zero effect on every event tested and
+made the full-history aggregate strictly worse — confirming the hypothesis
+was wrong, not just the implementation.
+
+The real problem: once inside that one position, the SMA200+ATR+T+2 trend
+signal was too slow to react to a severe *intra-trade* decline. Every
+mechanism tried so far in this session (`vix_threshold`, `atr_spike_multiplier`,
+`sma_slope_lookback`) only changes how fast a **signal-driven** exit
+confirms — none of them add a mechanism that watches the open position's
+own P&L independent of the trend signal.
+
+## Goal
+
+Add an **open-position trailing stop**: exit if price falls some
+percentage from its own peak since entry, regardless of what the SMA/ATR
+band currently says, then re-enter through normal signal logic after a
+cooldown. Validate whether this actually shrinks the dot-com episode, and —
+learning from Phase 5's VIX-threshold finding (a real effect that turned
+out to be ~COVID-specific) — check whether the benefit generalizes or is
+narrowly dot-com-specific before calling it a candidate for `bot.py`.
+
+## Evidence motivating the mechanism
+
+Pulled the actual equity path for the dot-com hold (script: ad-hoc, not
+committed — see "Testing" below for where this gets formalized) using the
+already-existing `equity_curve` field on `Backtester`'s result dict:
+
+- Entry 1999-11-12 at equity 175,674. True peak 600,290 on 2000-03-27.
+  Eventual signal-driven exit 106,946 on 2000-10-12.
+- A trailing stop of **-15% to -20% from the running peak since entry**
+  would have triggered **2000-01-04/05** — three months before the March
+  top — at ~294-304K equity, avoiding the bulk of the later collapse.
+- Measured only from the true 3/27 peak onward, the crash was fast:
+  -30% by 4/3, -50% by 4/12 (about two weeks) — a peak-relative % stop
+  catches most of it even at a fairly wide threshold, without needing to
+  be date- or event-aware.
+- **Caveat that shapes the design below:** a -15-20% dip also occurred in
+  early January 2000 that then rallied to the much higher March peak. A
+  naive "exit on stop, re-enter the moment the trend signal says in-market"
+  rule would likely re-buy the very next day (the SMA/ATR signal never
+  said "exit" — it was the stop, not the signal, that fired), making the
+  stop a no-op or a whipsaw-generator rather than protection.
+
+## Mechanism
+
+New optional constructor params on `SMATrendFollowing`:
+`trailing_stop_pct` (e.g. `0.20` for 20%) and
+`trailing_stop_cooldown_days` (e.g. `20`). Both default `None`/off,
+byte-identical to current behavior when unset — same convention as the
+three existing experimental params (`vix_threshold`, `atr_spike_multiplier`,
+`sma_slope_lookback`).
+
+1. **Peak tracking, reset per trade.** Track the running max of the
+   **signal-ticker's Close** (not the leveraged equity curve — see
+   rationale below) starting from the day a position enters. The peak
+   resets to that entry-day price each time a new position opens; it does
+   not persist across trades or across cash periods.
+2. **Trigger.** On any day Close falls below
+   `running_peak * (1 - trailing_stop_pct)`, force `in_market = False`
+   for that day — same same-day timing convention the existing SMA/ATR
+   band check already uses (i.e. **bypasses T+2** unconditionally when a
+   trailing stop fires, regardless of the `t2_confirmation` setting). The
+   whole premise of this mechanism is reacting faster than the slow trend
+   signal; gating it behind the same 2-day delay it exists to route
+   around would defeat the purpose.
+3. **Cooldown.** Once triggered, `in_market` is forced `False` for the
+   next `trailing_stop_cooldown_days` trading days *regardless of what the
+   SMA/ATR signal says*, even if the signal would otherwise say
+   "in-market" the very next day. After the cooldown elapses, normal
+   signal-driven entry logic resumes unmodified.
+4. **Measurement basis: underlying signal-ticker price, not leveraged
+   equity.** The existing SMA/ATR entry/exit logic already watches the
+   signal ticker's unleveraged Close — using the same series keeps the
+   threshold stable and comparable across leverage tiers (a 20% underlying
+   move means the same thing at 1x/2x/3x) and avoids needing separate
+   tuning per leverage config. The leveraged equity curve was considered
+   and rejected: at 3x, a given equity-% threshold corresponds to a much
+   smaller underlying move (e.g. -20% equity ≈ -7% underlying), which
+   would fire far more often and carries materially higher whipsaw risk.
+
+## Components
+
+### 1. `SMATrendFollowing` changes (`backtest/strat_backtest.py`)
+
+Extend `__init__` with the two new params (name string gets a
+`[Trailing Stop X%, cooldown Nd]` suffix when set, following the existing
+pattern for `vix_threshold` etc.). Extend `generate_signals()` (or
+wherever the `in_market` column is finalized) to compute the per-trade
+running peak, apply the trigger, and apply the cooldown mask. No changes
+to `Backtester` or `_run_portfolio_math` — the mechanism is entirely
+signal-side, same as the three existing experimental params.
+
+### 2. Event-relative sweep script
+
+Extend or duplicate `backtest/event_leverage_comparison.py`'s pattern:
+sweep `trailing_stop_pct ∈ {10%, 15%, 20%, 25%, 30%}` ×
+`trailing_stop_cooldown_days ∈ {10, 20, 40, 60}` (20 combinations) at the
+NDX/3x baseline (the config the dot-com evidence above was computed on),
+report event-relative decline for all 5 crises per combination. Look
+specifically for:
+- Whether dot-com's decline actually shrinks materially.
+- Non-monotonic cliffs between adjacent parameter values — the same
+  fragility signature Phase 6's `atr_spike_multiplier` showed (a huge win
+  at 1.5x that completely vanished at 1.75x). A candidate is only worth
+  carrying forward if neighboring parameter values behave similarly, not
+  if one specific combination looks great in isolation.
+
+### 3. Rolling-window validation
+
+For the best 1-2 candidates surviving the sweep, run the full 172-window
+rolling aggregate (`run_experiment_suite()` / `summarize_rolling_results()`,
+the project's standing methodology — see handover doc) to check overall
+Avg/Med/Worst TWR and Worst DD impact, not just the one event.
+
+### 4. Event-specificity segmentation check
+
+Same check that caught `vix_threshold` being ~COVID-specific (Phase 5):
+split the 172 rolling windows into dot-com-containing vs. not (windows
+whose 26-year span includes 2000-2002), compare average TWR improvement
+between the two groups. Report honestly whether the benefit is general or
+concentrated in one historical event — this is a finding to surface either
+way, not a gate that blocks writing it up.
+
+## Explicitly out of scope
+
+- ATR-multiple trailing stops (volatility-scaled distance) — rejected in
+  favor of fixed %, per user decision, to avoid another ATR-based knob
+  after Phase 6's fragility finding.
+- Re-entry via "wait for a fresh signal cross" (price must dip back below
+  the band and re-cross) — rejected in favor of a fixed day-count cooldown
+  for simplicity and ease of sweeping.
+- Leveraged-equity-curve-based stop thresholds — rejected, see Measurement
+  basis above.
+- Any change to `bot.py` or live trading behavior. Per this project's
+  established pattern (`vix_threshold`, `atr_spike_multiplier`,
+  `sma_slope_lookback` are all still unadopted), this stays an opt-in,
+  off-by-default experimental param pending validation results — adoption
+  is a separate decision after the sweep/rolling/segmentation results are
+  in.
+- Out-of-sample validation (train/test split like
+  `docs/superpowers/specs/2026-07-28-out-of-sample-validation-design.md`)
+  — reasonable natural next step if a candidate survives the sweep and
+  segmentation check, but not this pass.
+
+## Output location
+
+- Modified: `backtest/strat_backtest.py` (new params, byte-identical when
+  unset).
+- New script (name TBD at plan time, e.g.
+  `backtest/trailing_stop_sweep.py`): runnable standalone, writes a
+  scratch markdown output file, gitignored following the existing
+  4-file pattern in `.gitignore`.
+- Finding write-up: new standalone doc under `docs/`, following the
+  `docs/out-of-sample-validation-2026-07-28.md` precedent — states method,
+  the parameter grid, and the actual sweep/rolling/segmentation results.
+  Not added to README (this is exploratory research, same status as
+  Phases 5-7), unless results are strong enough that the user decides
+  otherwise at that point.
+
+## Testing
+
+No project test suite exists yet (tracked separately, same as every prior
+`generate_*`/analysis script in this project). Verification follows the
+established pattern: a smoke test on a reduced parameter combination
+before the full 20-combination × 5-event sweep, plus a manual check that
+`trailing_stop_pct=None` (default) reproduces byte-identical output to the
+current committed behavior — the same invariant already verified for
+`vix_threshold`/`atr_spike_multiplier`/`sma_slope_lookback`.
