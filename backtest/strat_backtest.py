@@ -249,7 +249,7 @@ class BuyAndHold(BaseStrategy):
 class SMATrendFollowing(BaseStrategy):
     def __init__(self, sma_window=200, buffer_pct=None, atr_multiplier=2.5, t2_confirmation=False,
                  vix_threshold=None, atr_spike_multiplier=None, atr_spike_lookback=60,
-                 sma_slope_lookback=None):
+                 sma_slope_lookback=None, trailing_stop_pct=None, trailing_stop_cooldown_days=20):
         # We handle naming and initialization cleanly
         name = f"SMA {sma_window} - " + (f"Static {buffer_pct*100}% Buffer" if buffer_pct else f"ATR Buffer (x{atr_multiplier})")
         if t2_confirmation:
@@ -260,6 +260,8 @@ class SMATrendFollowing(BaseStrategy):
             name += f" [ATR-spike x{atr_spike_multiplier} bypass]"
         if sma_slope_lookback:
             name += f" [SMA-slope {sma_slope_lookback}d re-entry filter]"
+        if trailing_stop_pct:
+            name += f" [Trailing Stop {trailing_stop_pct*100:.0f}%, cooldown {trailing_stop_cooldown_days}d]"
         super().__init__(name=name)
         self.sma_window = sma_window
         self.buffer_pct = buffer_pct
@@ -293,6 +295,24 @@ class SMATrendFollowing(BaseStrategy):
         # not exits — a declining SMA shouldn't make the strategy slower to
         # get OUT, only slower to get back IN on an unconfirmed reversal.
         self.sma_slope_lookback = sma_slope_lookback
+        # When set, exits the position the day the signal-ticker's Close
+        # falls trailing_stop_pct below its own running peak since the most
+        # recent entry — independent of what the SMA/ATR trend signal says.
+        # Measured against the unleveraged signal-ticker price (same series
+        # the entry/exit band already watches), not the leveraged equity
+        # curve: a given % threshold then means the same underlying move
+        # regardless of leverage tier, instead of needing separate tuning
+        # per leverage config. Acts immediately (bypasses t2_confirmation
+        # unconditionally) — the whole point is reacting faster than the
+        # slow trend signal, so gating it behind the same delay it exists
+        # to route around would defeat the purpose. After a stop-triggered
+        # exit, re-entry is blocked for trailing_stop_cooldown_days trading
+        # days regardless of the trend signal, then normal signal-driven
+        # entry logic resumes unmodified. A normal trend-signal-driven exit
+        # does NOT start a cooldown — only a trailing-stop-triggered one
+        # does. cooldown_days only matters when trailing_stop_pct is set.
+        self.trailing_stop_pct = trailing_stop_pct
+        self.trailing_stop_cooldown_days = trailing_stop_cooldown_days
 
     def get_live_stats(self, monitor_ticker="QQQ", leveraged_ticker="TQQQ", data=None):
         # 1. Get the base data (pass shared pre-downloaded data if provided)
@@ -411,7 +431,66 @@ class SMATrendFollowing(BaseStrategy):
         # 7. Shift the signal by 1 day and strictly cast to bool
         df['in_market'] = raw_signal.shift(1).fillna(initial_state_val).astype(bool)
 
+        # 8. Trailing-stop overlay (opt-in). Must run AFTER the vectorized
+        # state machine above, not fused into it: the trailing stop's peak
+        # tracking depends on when THIS overlay itself last opened a
+        # position, which depends on its own prior output — inherently
+        # sequential, unlike the band/T+2/bypass logic above.
+        if self.trailing_stop_pct:
+            df['in_market'] = self._apply_trailing_stop(df)
+
         return df
+
+    def _apply_trailing_stop(self, df):
+        """
+        Walks the already-computed (execution-day) in_market column day by
+        day. Tracks the running peak Close since the most recent entry;
+        forces an exit the day Close falls trailing_stop_pct below that
+        peak, regardless of the trend signal. After a stop-triggered exit,
+        forces in_market False for the next trailing_stop_cooldown_days
+        trading days even if the trend signal says in-market again; normal
+        trend-driven logic resumes once the cooldown elapses.
+        """
+        trend_in_market = df['in_market'].to_numpy()
+        close = df['Close'].to_numpy()
+        n = len(df)
+        final = np.zeros(n, dtype=bool)
+
+        was_in = False
+        peak = 0.0
+        cooldown = 0
+
+        for i in range(n):
+            if cooldown > 0:
+                final[i] = False
+                cooldown -= 1
+                was_in = False
+                continue
+
+            desired = trend_in_market[i]
+            if not desired:
+                final[i] = False
+                was_in = False
+                continue
+
+            if not was_in:
+                # Fresh entry (first entry, or re-entry after a cash
+                # period/cooldown): peak starts at today's close.
+                peak = close[i]
+                was_in = True
+                final[i] = True
+                continue
+
+            # Already holding: update the peak, then check the stop.
+            peak = max(peak, close[i])
+            if close[i] < peak * (1 - self.trailing_stop_pct):
+                final[i] = False
+                was_in = False
+                cooldown = self.trailing_stop_cooldown_days
+            else:
+                final[i] = True
+
+        return pd.Series(final, index=df.index)
 
 class DualSignalAgreement(BaseStrategy):
     """Requires ^NDX and ^GSPC's independent SMA+ATR trend signals to agree
