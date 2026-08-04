@@ -20,3 +20,4 @@ backtest/trailing_stop_stability_probe_output.md
 backtest/trailing_stop_execution_cost_output.md
 backtest/trailing_stop_dual_signal_output.md
 backtest/trailing_stop_dual_breach_output.md
+backtest/combined_system_comparison_output.md
