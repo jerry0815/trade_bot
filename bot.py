@@ -6,9 +6,9 @@ import sys
 if sys.stdout.encoding.lower() != 'utf-8':
     sys.stdout.reconfigure(encoding='utf-8')
 
-from backtest.strat_backtest import SMATrendFollowing, _download_with_retry, get_current_defensive_rotation
+from backtest.strat_backtest import SMATrendFollowing, DualSignalAgreement, _download_with_retry, get_current_defensive_rotation
 
-def generate_market_report(strategy, monitor_ticker="QQQ", leveraged_ticker="TQQQ", sp500_ticker="SPY"):
+def generate_market_report(strategy, strategy_d, monitor_ticker="QQQ", leveraged_ticker="TQQQ", sp500_ticker="SPY"):
     """
     Fetches strategy stats and formats them into your report template.
     Downloads all required tickers in a single yf.download call to avoid
@@ -25,10 +25,17 @@ def generate_market_report(strategy, monitor_ticker="QQQ", leveraged_ticker="TQQ
     
     # Get defensive rotation status
     def_rot = get_current_defensive_rotation(shared_data)
-    
-    # Check if either signal changed from yesterday
-    signal_changed = stats_sp500["trend_changed"] or stats_ndx["trend_changed"]
-    
+
+    # D's combined verdict (dual-signal agreement + ^GSPC trailing stop).
+    # Signals computed on ^NDX/^GSPC internally; monitor ticker only supplies
+    # the base price fields, which we don't use here.
+    stats_d = strategy_d.get_live_stats(sp500_ticker, leveraged_ticker, data=shared_data)
+    ts = stats_d["trailing_stop"]
+
+    # A change is D's recommended action being new as of today (a fresh entry,
+    # or an exit including a stop-triggered one). days_in_current_state == 1
+    # means today is the first day of the current state.
+    signal_changed = stats_d["days_in_current_state"] == 1
     change_alert = "🔄 **Signal Change Detected!**" if signal_changed else "✅ Status: No change in signal."
 
     date_str = pd.Timestamp.now().strftime("%Y-%m-%d")
@@ -51,6 +58,24 @@ def generate_market_report(strategy, monitor_ticker="QQQ", leveraged_ticker="TQQ
             f"• Status: **{trend}** {emoji}\n"
             f"• Duration: {streak_days} trading days {state_label} (since {state_since})"
         )
+
+    def format_trailing_stop(ts):
+        header = "🛑 **TRAILING STOP (S&P 500, 8% / 60d)**"
+        if ts["state"] in ("holding", "triggered"):
+            price_lines = (
+                f"• Peak since entry: {ts['peak']:.2f} | Current: {ts['current']:.2f}\n"
+                f"• Drop from peak: {ts['drop_pct']:.2f}% "
+                f"(trigger at -8.00%, {ts['distance_pct']:.2f}% to go)\n"
+            )
+        else:
+            price_lines = "• Peak since entry: n/a | Current: n/a\n"
+        status = {
+            "holding":   "Holding",
+            "triggered": "SELL — S&P fell 8% from peak",
+            "cooldown":  f"In cash — stop cooldown, {ts['cooldown_left']} trading days until re-entry allowed",
+            "inactive":  "In cash — no position",
+        }[ts["state"]]
+        return f"{header}\n{price_lines}• Status: {status}"
 
     winner = def_rot['winner']
     display_winner = "SHY / SGOV" if winner == "SHY" else winner
@@ -75,7 +100,9 @@ def generate_market_report(strategy, monitor_ticker="QQQ", leveraged_ticker="TQQ
         f"• Offensive ({leveraged_ticker}): {stats_ndx['leveraged_price']:.2f} (Adjust based on primary signal)\n"
         f"{def_msg}\n"
         f"--------------------------\n"
-        f"🚩 **RECOMMENDED ACTION:** {stats_sp500['action']}"
+        f"{format_trailing_stop(ts)}\n"
+        f"--------------------------\n"
+        f"🚩 **RECOMMENDED ACTION:** {stats_d['action']}"
     )
     
     return message
@@ -84,7 +111,9 @@ def run_bot():
     webhook_url = os.environ.get("DISCORD_WEBHOOK")
 
     strat = SMATrendFollowing(sma_window=200, t2_confirmation=True)
-    message = generate_market_report(strat)
+    strat_d = DualSignalAgreement(sma_window=200, atr_multiplier=2.5, t2_confirmation=False,
+                                  trailing_stop_pct=0.08, trailing_stop_cooldown_days=60)
+    message = generate_market_report(strat, strat_d)
     
     # Send to Discord
     if webhook_url:
