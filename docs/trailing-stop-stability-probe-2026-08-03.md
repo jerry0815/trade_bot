@@ -103,10 +103,24 @@ cannot state the return side at all.
 
 ## Remaining gaps
 
-- **Commissions and slippage are still unmodeled** — the one originally
-  deferred follow-up never completed. At 17.8 vs. 11.1 trades per 26-year
-  window this is ~6.7 extra round trips over 26 years, which is modest, but
-  it has never been quantified on a 3x leveraged product.
+- ~~**Commissions and slippage are still unmodeled**~~ — **resolved
+  2026-08-03**, and the concern was overstated. `backtest/trailing_stop_execution_cost.py`
+  quantifies it: 6.7 extra round trips per 26-year window at a generous 2bps
+  one-way assumption is 26.8bps total, or **0.0103pp/yr** — roughly three
+  orders of magnitude below the ±5pp return-surface noise above. Commissions
+  on US-listed ETFs are $0 at mainstream retail brokers. This was never the
+  binding uncertainty; the parameter noise is.
+- **Execution must be market-on-open, not a resting limit.** The same script
+  measures the traded-ticker gap on all 25 historical stop-trigger days: the
+  open is at or above the prior close 76% of the time, but gaps below it 24%
+  of the time — and those 6 no-fill days cluster on the most severe events in
+  the sample (2020-02-28 COVID at -3.59%, 2000-10-11 dot-com at -3.47%,
+  2022-01-24 at -1.92%). A sell limit resting at the prior close fills on
+  ordinary stop days and fails precisely during crashes, where it can remain
+  unfilled for the entire decline. `Backtester._run_portfolio_math` already
+  models the correct behavior (exit fills at today's open, gap included), so
+  the backtested numbers are achievable — but only via an order type that
+  participates in the opening auction.
 - **The 9%/10% cliff mechanism is uninvestigated.** Why widening the stop
   by one point flips it from universally helpful to universally harmful is
   not understood. A plausible story (rarer firing lands the stop closer to
