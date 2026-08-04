@@ -237,6 +237,74 @@ class BaseStrategy:
             "state_since"          : state_since.strftime("%Y-%m-%d"),
         }
 
+    def _apply_trailing_stop(self, df, price=None):
+        """
+        Walks the already-computed (execution-day) in_market column day by
+        day. Tracks the running peak Close since the most recent entry;
+        forces an exit the day Close falls trailing_stop_pct below that
+        peak, regardless of the trend signal. After a stop-triggered exit,
+        forces in_market False for the next trailing_stop_cooldown_days
+        trading days even if the trend signal says in-market again; normal
+        trend-driven logic resumes once the cooldown elapses.
+
+        price: optional Series to track the stop against (peak + breach).
+        Defaults to df['Close']. DualSignalAgreement passes ^GSPC explicitly
+        so the stop tracks the validated reference even when df['Close'] is
+        an ETF (the live path) rather than the ^GSPC signal (the backtest).
+
+        Lookahead-free by construction: in_market[i] is already the
+        EXECUTION-day column, and _run_portfolio_math sells an exit day at
+        TODAY'S OPEN, so the decision for day i may only use information
+        available before day i's open -- i.e. close[i-1], never close[i].
+        All three reads below (peak init on a fresh entry, the running peak
+        update, and the breach comparison) use the SAME lagged close series.
+
+        Precedence: when a trend-signal exit and a stop breach would both
+        apply on the same day, the trend-signal exit wins (the `not desired`
+        branch is checked first) and does NOT start a cooldown -- only a
+        stop-triggered exit does.
+        """
+        trend_in_market = df['in_market'].to_numpy()
+        close = (df['Close'] if price is None else price).to_numpy()
+        close_lagged = np.roll(close, 1)
+        if len(close_lagged):
+            close_lagged[0] = close[0]
+        n = len(df)
+        final = np.zeros(n, dtype=bool)
+
+        was_in = False
+        peak = 0.0
+        cooldown = 0
+
+        for i in range(n):
+            if cooldown > 0:
+                final[i] = False
+                cooldown -= 1
+                was_in = False
+                continue
+
+            desired = trend_in_market[i]
+            if not desired:
+                final[i] = False
+                was_in = False
+                continue
+
+            if not was_in:
+                peak = close_lagged[i]
+                was_in = True
+                final[i] = True
+                continue
+
+            peak = max(peak, close_lagged[i])
+            if close_lagged[i] < peak * (1 - self.trailing_stop_pct):
+                final[i] = False
+                was_in = False
+                cooldown = self.trailing_stop_cooldown_days
+            else:
+                final[i] = True
+
+        return pd.Series(final, index=df.index)
+
 class BuyAndHold(BaseStrategy):
     def __init__(self):
         super().__init__(name="Buy & Hold")
@@ -443,91 +511,6 @@ class SMATrendFollowing(BaseStrategy):
             df['in_market'] = self._apply_trailing_stop(df)
 
         return df
-
-    def _apply_trailing_stop(self, df):
-        """
-        Walks the already-computed (execution-day) in_market column day by
-        day. Tracks the running peak Close since the most recent entry;
-        forces an exit the day Close falls trailing_stop_pct below that
-        peak, regardless of the trend signal. After a stop-triggered exit,
-        forces in_market False for the next trailing_stop_cooldown_days
-        trading days even if the trend signal says in-market again; normal
-        trend-driven logic resumes once the cooldown elapses.
-
-        Lookahead-free by construction: in_market[i] is already the
-        EXECUTION-day column (step 7 above applies raw_signal.shift(1)), and
-        _run_portfolio_math sells an exit day at TODAY'S OPEN. So the decision
-        for day i may only use information available before day i's open —
-        i.e. close[i-1], never close[i]. All three reads below (peak
-        initialization on a fresh entry, the running peak update, and the
-        breach comparison) therefore use the SAME lagged close series; mixing
-        a lagged peak with an unlagged breach check (or vice versa) would
-        reintroduce the same one-day lookahead in partial form.
-
-        Precedence: when a trend-signal exit and a stop breach would both
-        apply on the same day, the trend-signal exit wins (the `not desired`
-        branch is checked first) and does NOT start a cooldown — only a
-        stop-triggered exit does. This is deliberate: the cooldown exists to
-        stop the stop's own re-entry whipsaw, and a normal trend exit already
-        has the band/T+2 logic governing when it re-enters.
-        """
-        trend_in_market = df['in_market'].to_numpy()
-        # Lagged close: close_lagged[i] is the close of day i-1, the most
-        # recent close knowable before day i's open. Row 0 has no prior close;
-        # it is seeded with close[0] so a fresh entry on row 0 initializes the
-        # peak sanely. No breach check can fire at i == 0 regardless (was_in
-        # starts False, so row 0 can only take the fresh-entry or flat branch),
-        # so the seed can never manufacture a spurious row-0 stop.
-        # NaN note: a NaN close propagates to peak/breach comparisons as False,
-        # so a mid-trade NaN is simply ignored day-to-day. A NaN landing on a
-        # fresh-entry day would make peak NaN for the rest of that trade
-        # (no breach could ever fire). Unreachable with this project's ^NDX /
-        # ^GSPC sources, so no defensive code — flagged only so a future data
-        # source with gaps doesn't hit this silently.
-        close = df['Close'].to_numpy()
-        close_lagged = np.roll(close, 1)
-        if len(close_lagged):
-            close_lagged[0] = close[0]
-        n = len(df)
-        final = np.zeros(n, dtype=bool)
-
-        was_in = False
-        peak = 0.0
-        cooldown = 0
-
-        for i in range(n):
-            if cooldown > 0:
-                final[i] = False
-                cooldown -= 1
-                was_in = False
-                continue
-
-            desired = trend_in_market[i]
-            if not desired:
-                final[i] = False
-                was_in = False
-                continue
-
-            if not was_in:
-                # Fresh entry (first entry, or re-entry after a cash
-                # period/cooldown): peak starts at the last close knowable
-                # before this entry executes — yesterday's close.
-                peak = close_lagged[i]
-                was_in = True
-                final[i] = True
-                continue
-
-            # Already holding: update the peak, then check the stop. Both read
-            # yesterday's close (see the lookahead note in the docstring).
-            peak = max(peak, close_lagged[i])
-            if close_lagged[i] < peak * (1 - self.trailing_stop_pct):
-                final[i] = False
-                was_in = False
-                cooldown = self.trailing_stop_cooldown_days
-            else:
-                final[i] = True
-
-        return pd.Series(final, index=df.index)
 
 class DualSignalAgreement(BaseStrategy):
     """Requires ^NDX and ^GSPC's independent SMA+ATR trend signals to agree
