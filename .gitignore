@@ -17,3 +17,4 @@ backtest/trailing_stop_tax_aware_out_of_sample_output.md
 backtest/trailing_stop_region_validate_output.md
 backtest/overlay_comparison_rolling_output.md
 backtest/trailing_stop_stability_probe_output.md
+backtest/trailing_stop_execution_cost_output.md
