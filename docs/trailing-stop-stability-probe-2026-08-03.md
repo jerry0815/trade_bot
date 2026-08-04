@@ -73,6 +73,19 @@ costs" was too generous — the honest estimate is *unknown, plausibly
 negative*, with uncertainty of several percentage points in either
 direction, before commissions and slippage are even modeled.
 
+**Averaging the plateau gives a negative central estimate.** Picking the
+best point on a noisy surface overstates it. Averaging instead across the
+configurations that share the drawdown property:
+
+- pct axis, 6/7/8/9% at 60d: -5.84, -7.42, +1.66, +4.17 → **mean -1.86pp**
+- cooldown axis, 40/60/80d at 8%: +2.39, +1.66, -5.28 → **mean -0.41pp**
+
+Both are negative. A grid is not a probability distribution over parameter
+choices, so neither figure is a rigorous estimator — but both are more
+defensible than the `+1.66pp` point estimate, which is the second-best of
+four points on its own axis. The honest central estimate of the return
+effect is a **cost of roughly 0.4-1.9pp/yr**, not zero and not a gain.
+
 Note also that `(9%, 60d)` dominates the candidate on this data — better
 return (+4.17pp vs. +1.66pp) *and* better drawdown (-63.06% vs. -64.77%).
 It is not recommended over `(8%, 60d)` precisely because it sits directly
