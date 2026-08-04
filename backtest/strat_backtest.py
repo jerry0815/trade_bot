@@ -519,14 +519,20 @@ class DualSignalAgreement(BaseStrategy):
     signals disagree, or either sits in its own neutral zone, holds the
     prior state (mirrors the existing neutral-zone hold behavior)."""
 
-    def __init__(self, sma_window=200, atr_multiplier=2.5, t2_confirmation=False):
+    def __init__(self, sma_window=200, atr_multiplier=2.5, t2_confirmation=False,
+                 trailing_stop_pct=None, trailing_stop_cooldown_days=60):
         name = f"Dual-Signal Agreement (ATR x{atr_multiplier})"
         if t2_confirmation:
             name += " [T+2]"
+        if trailing_stop_pct:
+            name += (f" [Trailing Stop {trailing_stop_pct*100:.1f}%, "
+                     f"cooldown {trailing_stop_cooldown_days}d]")
         super().__init__(name=name)
         self.sma_window = sma_window
         self.atr_multiplier = atr_multiplier
         self.t2_confirmation = t2_confirmation
+        self.trailing_stop_pct = trailing_stop_pct
+        self.trailing_stop_cooldown_days = trailing_stop_cooldown_days
 
     def _trend_state(self, ticker):
         sig_df = get_cached_signals(ticker, self.sma_window)
@@ -563,6 +569,13 @@ class DualSignalAgreement(BaseStrategy):
         initial_state_val = 1.0 if bool(ndx_bull.iloc[0] and gspc_bull.iloc[0]) else 0.0
         raw_signal = state.ffill().fillna(initial_state_val)
         df['in_market'] = raw_signal.shift(1).fillna(initial_state_val).astype(bool)
+        if self.trailing_stop_pct:
+            # Preserve the pre-stop dual-signal column so the live status
+            # helper can re-walk it; track the stop against ^GSPC (the
+            # validated reference), reindexed to this df's calendar.
+            df['trend_in_market'] = df['in_market'].copy()
+            gspc_close = get_cached_signals("^GSPC")["Close"].reindex(df.index).ffill()
+            df['in_market'] = self._apply_trailing_stop(df, price=gspc_close)
         return df
 
 class VolatilityFilter(BaseStrategy):
