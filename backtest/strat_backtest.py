@@ -305,6 +305,62 @@ class BaseStrategy:
 
         return pd.Series(final, index=df.index)
 
+    def _trailing_stop_status(self, df, price=None):
+        """Current stop state for live reporting. Re-walks the same peak/
+        cooldown logic as _apply_trailing_stop over df['trend_in_market']
+        (the pre-stop signal) and reads the final day. Separate walk by
+        design, so _apply_trailing_stop stays untouched (its numbers are a
+        regression gate). Returns a dict; all price fields are None when
+        there is no live position to protect."""
+        inactive = {"state": "inactive", "peak": None, "current": None,
+                    "drop_pct": None, "distance_pct": None, "cooldown_left": None}
+        if not getattr(self, "trailing_stop_pct", None) or "trend_in_market" not in df:
+            return inactive
+        trend = df["trend_in_market"].to_numpy()
+        series = (df["Close"] if price is None else price)
+        close = series.to_numpy()
+        lag = np.roll(close, 1)
+        if len(lag):
+            lag[0] = close[0]
+        n = len(df)
+        pct = self.trailing_stop_pct
+        was_in = False
+        peak = 0.0
+        cooldown = 0
+        state = "inactive"
+        cur_peak = None
+        cur_cd = None
+        for i in range(n):
+            if cooldown > 0:
+                cooldown -= 1
+                was_in = False
+                state, cur_peak, cur_cd = "cooldown", None, cooldown
+                continue
+            if not trend[i]:
+                was_in = False
+                state, cur_peak, cur_cd = "inactive", None, None
+                continue
+            if not was_in:
+                peak = lag[i]
+                was_in = True
+                state, cur_peak, cur_cd = "holding", peak, None
+                continue
+            peak = max(peak, lag[i])
+            if lag[i] < peak * (1 - pct):
+                was_in = False
+                cooldown = self.trailing_stop_cooldown_days
+                state, cur_peak, cur_cd = "triggered", peak, self.trailing_stop_cooldown_days
+            else:
+                state, cur_peak, cur_cd = "holding", peak, None
+        if state in ("cooldown", "inactive"):
+            return {"state": state, "peak": None, "current": None,
+                    "drop_pct": None, "distance_pct": None, "cooldown_left": cur_cd}
+        current = float(close[-1])
+        drop_pct = (current - cur_peak) / cur_peak * 100.0
+        distance_pct = drop_pct - (-pct * 100.0)
+        return {"state": state, "peak": float(cur_peak), "current": current,
+                "drop_pct": drop_pct, "distance_pct": distance_pct, "cooldown_left": None}
+
 class BuyAndHold(BaseStrategy):
     def __init__(self):
         super().__init__(name="Buy & Hold")
@@ -577,6 +633,15 @@ class DualSignalAgreement(BaseStrategy):
             gspc_close = get_cached_signals("^GSPC")["Close"].reindex(df.index).ffill()
             df['in_market'] = self._apply_trailing_stop(df, price=gspc_close)
         return df
+
+    def get_live_stats(self, monitor_ticker="QQQ", leveraged_ticker="TQQQ", data=None):
+        stats = super().get_live_stats(monitor_ticker, leveraged_ticker, data=data)
+        # self.df now carries in_market (post-stop) and, when the stop is on,
+        # trend_in_market (pre-stop). action in `stats` already reflects the
+        # post-stop column, i.e. D's verdict.
+        gspc_close = get_cached_signals("^GSPC")["Close"].reindex(self.df.index).ffill()
+        stats["trailing_stop"] = self._trailing_stop_status(self.df, price=gspc_close)
+        return stats
 
 class VolatilityFilter(BaseStrategy):
     def __init__(self, name="VIX Filter (<25)", vix_threshold=25):
