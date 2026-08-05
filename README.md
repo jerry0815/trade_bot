@@ -1,36 +1,52 @@
 # TQQQ-Trend-Follower-Bot
 
 ### **Project Overview**
-This project is an automated trading monitor system designed for long-term investors tracking 3x leveraged ETFs like TQQQ. By utilizing a **200-Day Simple Moving Average (200 SMA)**, the system provides real-time trend assessment to maximize compound growth during bull markets and execute defensive exit strategies before systemic bear markets.
+This project is an automated trading monitor system designed for long-term investors tracking 3x leveraged ETFs like TQQQ. It layers a **200-Day SMA + ATR trend signal**, **dual-signal agreement** (the NASDAQ-100 and S&P 500 must concur), and a **trailing stop** for crash protection into a single daily recommendation — aiming to compound through bull markets while exiting defensively before systemic drawdowns. See [How It Works](#how-it-works) for the mechanics.
 
 ---
 
-### Strategy Logic: Dynamic ATR Protection
+### How It Works
 
-The system provides a clear, rule-based approach to market exposure. We move beyond simple "price crossing SMA" signals by adding a dynamic volatility buffer using the **Average True Range (ATR)**.
+`bot.py` produces one daily recommendation by stacking three layers, each fixing a weakness of the layer before it. The Discord report shows the underlying signals for transparency, but the headline **recommended action** is the combined verdict of all three.
 
-**The Decision Rules:**
+#### Layer 1 — The core trend signal (SMA 200 + ATR buffer)
 
-*   **Bullish:** When the price rises **above** the upper buffer:
-    `Price > (SMA200 + 2.5 * ATR)`
-    *Action: Enter or maintain long positions to capture growth.*
+Each index's trend is classified against a 200-day Simple Moving Average with a volatility buffer sized by **Average True Range (ATR)** — "breathing room" that widens in volatile markets and tightens in calm ones, so the strategy adapts instead of reacting to every minor wiggle:
 
-*   **Bearish:** When the price falls **below** the lower buffer:
-    `Price < (SMA200 - 2.5 * ATR)`
-    *Action: Exit to cash or short-term Treasuries (e.g., SGOV/BIL) to protect capital.*
+*   **Bullish** — price above the upper buffer: `Price > SMA200 + 2.5 * ATR` → enter or hold to capture growth.
+*   **Bearish** — price below the lower buffer: `Price < SMA200 - 2.5 * ATR` → exit to cash or short-term Treasuries (e.g. SGOV/BIL) to protect capital.
+*   **Neutral** — price inside the buffer → hold the current position (prevents "whipsawing" during indecisive markets).
 
-*   **Neutral:** When the price is **inside** the buffer:
-    `(SMA200 - 2.5 * ATR) <= Price <= (SMA200 + 2.5 * ATR)`
-    *Action: Hold existing position. This prevents "whipsawing" during indecisive market periods.*
+#### Layer 2 — A noise filter: dual-signal agreement
 
-**T+2 Confirmation:** A crossing of the upper or lower buffer doesn't execute immediately. The new signal (bullish or bearish) must persist for **2 consecutive trading days** before the bot changes state. A single day spent outside the buffer that reverts back inside the next day is treated as noise and ignored. This adds a short delay to every entry/exit but filters out one-day spikes that would otherwise trigger a whipsaw trade.
+A single band crossing can be a one-day head-fake. Two ways to filter that noise were tested:
 
-### Key Components
+*   **T+2 confirmation** — a new signal must persist **2 consecutive trading days** before acting (temporal persistence). Used in the single-signal setups and Tables 1–3.
+*   **Dual-signal agreement** — flip state only when **both** the NASDAQ-100 (^NDX) *and* the S&P 500 (^GSPC) independently agree; if they disagree, hold the prior position (cross-index persistence).
 
-*   **The Trend Anchor (SMA 200):** We utilize the 200-day Simple Moving Average as our "North Star" to filter out market noise and focus on the primary long-term trend.
-*   **The Volatility Shield (ATR):** By applying a 2.5x ATR multiplier, we create a "breathing room" buffer that expands during volatile markets and tightens during calm ones, ensuring the strategy adapts to current market conditions.
-*   **T+2 Signal Confirmation:** Buy/sell signals must hold for two consecutive trading days before a state change executes, filtering out single-day false signals.
-*   **Disciplined Execution:** By automating these calculations, the system removes emotional bias and ensures strict, math-based adherence to your risk parameters.
+`bot.py` uses **dual-signal agreement** as its noise filter — not T+2, since stacking both is redundant (see Table 4). It still trades ^NDX (TQQQ) exposure; the S&P is a second confirming vote, not a separate position.
+
+#### Layer 3 — The trailing stop (crash protection)
+
+The trend signal is deliberately slow, so a sharp crash can inflict heavy damage before it confirms a bearish turn. The trailing stop is a faster safety net on top:
+
+*   While in a position, track the **running peak of the (unleveraged) S&P 500 price** since entry.
+*   The day the S&P closes **8% below that peak**, exit immediately — bypassing the dual-signal delay entirely.
+*   After a stop-triggered exit, block re-entry for a **60-trading-day cooldown**, so a still-elevated trend signal doesn't buy straight back into a falling market.
+
+It tracks the *unleveraged* S&P price, not the 3x equity curve — the leveraged curve swings ~3× as hard and would trip the stop constantly. The stop is opt-in; `bot.py` runs it at 8% / 60d.
+
+```mermaid
+stateDiagram-v2
+    [*] --> InCash
+    InCash --> InPosition: both indices agree bullish
+    InPosition --> InPosition: track S&P peak since entry
+    InPosition --> Cooldown: S&P falls 8% below peak (stop fires)
+    InPosition --> InCash: trend turns bearish (normal exit)
+    Cooldown --> InCash: 60 trading days elapse
+```
+
+The **recommended action** is "in the market" only when both indices agree bullish **and** the trailing stop has not fired. Full validation of the trailing stop — out-of-sample generalization, parameter stability, execution cost, and crash-event behavior — lives in the [`docs/`](docs/) finding chain (`docs/trailing-stop-*`, `docs/combined-system-comparison-2026-08-03.md`).
 
 ---
 
@@ -51,6 +67,12 @@ All results below are produced by rolling 26-year backtests stepped forward **mo
 - Tax: **not applied** (pre-tax returns)
 
 ---
+
+## Backtest Results
+
+- **Tables 1–3** — strategy comparison (SMA 200 vs EMA 50/200 vs Buy & Hold vs VIX/RSI) across signal sources and leverage tiers.
+- **Table 4** — signal-source comparison (NDX vs S&P 500 vs dual-signal agreement), plus the trailing-stop overlay on the two most relevant setups.
+- **Table 5** — drawdown by crash event, per strategy.
 
 ### Table 1: NASDAQ-100 (^NDX) — Lump Sum Performance
 *Date range: 1986-04-29 to 2000-07-28 (172 rolling windows)*
@@ -102,7 +124,7 @@ All results below are produced by rolling 26-year backtests stepped forward **mo
 | **1x** | VIX < 25 | 3.85% | 4.03% | 2.23% | -46.92% | 123 |
 | **1x** | RSI 30/70 | 5.78% | 5.80% | 4.94% | -52.65% | 23 |
 
-> **With T+2 confirmation, EMA 50/200 overtakes SMA 200 on the S&P 500 signal** — higher average TWR *and* a shallower max drawdown at every leverage tier (e.g. at 1x: 7.88% avg / -33.26% DD for EMA vs 7.49% avg / -34.45% DD for SMA). This reverses the pre-T+2 result, where SMA led on ^GSPC — consistent with the two-day confirmation delay costing SMA more in lost entry/exit timing than it saves in avoided whipsaws, though this comparison isn't a controlled same-window ablation (the window set itself also shifted between the pre- and post-T+2 numbers), so treat the causal read as a plausible hypothesis rather than a proven mechanism. `bot.py` runs the same T+2-confirmed SMA strategy on both its NASDAQ-100 and S&P 500 monitors for consistency — Table 1 continues to support that choice on the NASDAQ-100 signal, while this table shows EMA would historically have done better specifically on the S&P 500 signal.
+> **With T+2 confirmation, EMA 50/200 overtakes SMA 200 on the S&P 500 signal** — higher average TWR *and* a shallower max drawdown at every leverage tier (e.g. at 1x: 7.88% avg / -33.26% DD for EMA vs 7.49% avg / -34.45% DD for SMA). This reverses the pre-T+2 result, where SMA led on ^GSPC — consistent with the two-day confirmation delay costing SMA more in lost entry/exit timing than it saves in avoided whipsaws, though this comparison isn't a controlled same-window ablation (the window set itself also shifted between the pre- and post-T+2 numbers), so treat the causal read as a plausible hypothesis rather than a proven mechanism. `bot.py` displays each index's T+2-confirmed SMA trend as a component monitor (its headline recommendation now layers dual-signal agreement + a trailing stop on top — see [How It Works](#how-it-works) and Table 4) — Table 1 continues to support the SMA choice on the NASDAQ-100 signal, while this table shows EMA would historically have done better specifically on the S&P 500 signal.
 
 ---
 
@@ -189,14 +211,11 @@ See [CHANGELOG.md](CHANGELOG.md) for a full history of changes with dates.
 ---
 
 ### **Strategy Research & Theoretical Basis**
-This bot implements a **Trend-Following Strategy** enhanced with a **Triple-Filter System** to mitigate "Whipsaw" (false signals). This methodology is supported by key quantitative finance principles:
+The bot implements a **trend-following strategy** for leveraged ETFs, grounded in a few quantitative-finance principles (the mechanics themselves are in [How It Works](#how-it-works)):
 
-1. **Trend-Filtering for Leveraged ETFs:** Leveraged ETFs are subject to *Volatility Decay*. Research (e.g., Meb Faber) suggests that 200-day trend filters effectively "clip the left tail" of risk, preventing catastrophic drawdowns during secular bear markets.
-2. **The Triple-Filter Mechanism:**
-    * **SMA 200:** Identifies the long-term regime (Bull vs. Bear).
-    * **ATR (Average True Range) Filter:** Dynamically adjusts the "No-Trade Zone" based on current market volatility, preventing the bot from overreacting to minor noise in stable markets.
-    * **T+2 Confirmation:** Requires a signal to persist for two consecutive trading days before acting, filtering out one-day spikes that would otherwise trigger a whipsaw trade.
-3. **Core Objective:** To improve **Risk-Adjusted Returns** by preserving capital during systemic failures rather than attempting to time minor market tops.
+1. **Trend-filtering for leveraged ETFs:** Leveraged ETFs suffer from *volatility decay*. Research (e.g. Meb Faber) shows that 200-day trend filters effectively "clip the left tail" of risk, preventing catastrophic drawdowns during secular bear markets.
+2. **Layered noise-and-crash filtering:** the ATR buffer, dual-signal agreement, and trailing stop each target a distinct failure mode — minor noise, single-signal head-fakes, and fast crashes respectively — rather than leaning on one filter to do everything.
+3. **Core objective:** improve **risk-adjusted returns** by preserving capital during systemic failures rather than trying to time minor market tops.
 
 ---
 
