@@ -37,13 +37,11 @@ The trend signal is deliberately slow, so a sharp crash can inflict heavy damage
 It tracks the *unleveraged* S&P price, not the 3x equity curve — the leveraged curve swings ~3× as hard and would trip the stop constantly. The stop is opt-in; `bot.py` runs it at 8% / 60d.
 
 ```mermaid
-stateDiagram-v2
-    direction LR
-    [*] --> InCash
-    InCash --> InPosition: both bullish
-    InPosition --> Cooldown: S&P falls 8%
-    InPosition --> InCash: trend bearish
-    Cooldown --> InCash: after 60 days
+flowchart LR
+    Cash([In cash]) -->|both bullish| Pos([In position])
+    Pos -->|S&P falls 8%| Cool([Cooldown 60d])
+    Pos -->|trend bearish| Cash
+    Cool -->|60 days elapse| Cash
 ```
 
 The **recommended action** is "in the market" only when both indices agree bullish **and** the trailing stop has not fired. Full validation of the trailing stop — out-of-sample generalization, parameter stability, execution cost, and crash-event behavior — lives in the [`docs/`](docs/) finding chain (`docs/trailing-stop-*`, `docs/combined-system-comparison-2026-08-03.md`).
