@@ -356,9 +356,16 @@ class BaseStrategy:
             return {"state": state, "peak": None, "current": None,
                     "drop_pct": None, "distance_pct": None, "cooldown_left": cur_cd}
         current = float(close[-1])
-        drop_pct = (current - cur_peak) / cur_peak * 100.0
+        # cur_peak is the running max of the LAGGED close (yesterday-and-earlier),
+        # the basis the stop's trigger actually decides on. `current` is today's
+        # unlagged close, so on a fresh-high day current can exceed cur_peak. For
+        # a human-facing report, fold today's close into the displayed peak so it
+        # never reads "current above peak" with a positive "drop" -- the trigger
+        # logic in _apply_trailing_stop is unaffected (it stays fully lagged).
+        disp_peak = max(cur_peak, current)
+        drop_pct = (current - disp_peak) / disp_peak * 100.0
         distance_pct = drop_pct - (-pct * 100.0)
-        return {"state": state, "peak": float(cur_peak), "current": current,
+        return {"state": state, "peak": float(disp_peak), "current": current,
                 "drop_pct": drop_pct, "distance_pct": distance_pct, "cooldown_left": None}
 
 class BuyAndHold(BaseStrategy):
