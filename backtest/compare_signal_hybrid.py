@@ -34,6 +34,15 @@ SETUPS = [
     ("S&P 500 signal [T+2]", SMATrendFollowing(sma_window=200, atr_multiplier=ATR, t2_confirmation=True), "^GSPC"),
     ("Dual-signal agreement", DualSignalAgreement(sma_window=200, atr_multiplier=ATR, t2_confirmation=False), None),
     ("Dual-signal agreement [T+2]", DualSignalAgreement(sma_window=200, atr_multiplier=ATR, t2_confirmation=True), None),
+    # Trailing-stop overlays (opt-in ^GSPC stop, 8% / 60d cooldown). The stop
+    # tracks ^GSPC in both: for the S&P setup df['Close'] is ^GSPC; for the
+    # dual-signal setup DualSignalAgreement fetches ^GSPC internally.
+    ("S&P 500 signal [T+2] + Trailing Stop 8%/60d",
+     SMATrendFollowing(sma_window=200, atr_multiplier=ATR, t2_confirmation=True,
+                       trailing_stop_pct=0.08, trailing_stop_cooldown_days=60), "^GSPC"),
+    ("Dual-signal agreement + Trailing Stop 8%/60d",
+     DualSignalAgreement(sma_window=200, atr_multiplier=ATR, t2_confirmation=False,
+                         trailing_stop_pct=0.08, trailing_stop_cooldown_days=60), None),
 ]
 
 
