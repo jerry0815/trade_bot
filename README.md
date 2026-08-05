@@ -38,12 +38,12 @@ It tracks the *unleveraged* S&P price, not the 3x equity curve — the leveraged
 
 ```mermaid
 stateDiagram-v2
+    direction LR
     [*] --> InCash
-    InCash --> InPosition: both indices agree bullish
-    InPosition --> InPosition: track S&P peak since entry
-    InPosition --> Cooldown: S&P falls 8% below peak (stop fires)
-    InPosition --> InCash: trend turns bearish (normal exit)
-    Cooldown --> InCash: 60 trading days elapse
+    InCash --> InPosition: both bullish
+    InPosition --> Cooldown: S&P falls 8%
+    InPosition --> InCash: trend bearish
+    Cooldown --> InCash: after 60 days
 ```
 
 The **recommended action** is "in the market" only when both indices agree bullish **and** the trailing stop has not fired. Full validation of the trailing stop — out-of-sample generalization, parameter stability, execution cost, and crash-event behavior — lives in the [`docs/`](docs/) finding chain (`docs/trailing-stop-*`, `docs/combined-system-comparison-2026-08-03.md`).
