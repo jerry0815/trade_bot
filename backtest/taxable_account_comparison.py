@@ -5,8 +5,11 @@ and dual-signal agreement (with and without the same stop).
 
 For each setup, runs the 26-yr monthly rolling suite TWICE via
 run_experiment_suite() -- once apply_tax=False, once apply_tax=True -- and
-reports Pre-Tax Avg TWR, After-Tax Avg TWR, Tax Drag (pp) = pre - after,
-After-Tax Worst DD, and Avg Trades. This surfaces the point that the
+reports the full rolling distribution: Pre-Tax Avg TWR, After-Tax Avg / Med
+/ Worst TWR (across all rolling windows), Tax Drag (pp) = pre-avg - after-avg,
+After-Tax Worst DD, and Avg Trades. Reporting the median and worst-case
+after-tax return (not just the average) makes this a proper rolling-test
+view, consistent with Tables 1-4. This surfaces the point that the
 trailing-stop variants trade more often, realizing more short-term gains,
 so they should show a *larger* tax drag than their no-stop counterparts
 even though their pre-tax edge looked attractive.
@@ -102,6 +105,8 @@ def run_setup(label, strat_factory, signal_ticker):
         "Label": label,
         "Pre-Tax Avg TWR": pretax_row["Avg TWR"],
         "After-Tax Avg TWR": aftertax_row["Avg TWR"],
+        "After-Tax Med TWR": aftertax_row["Med TWR"],
+        "After-Tax Worst TWR": aftertax_row["Worst TWR"],
         "Tax Drag": pretax_row["Avg TWR"] - aftertax_row["Avg TWR"],
         "After-Tax Worst DD": aftertax_row["Worst DD"],
         "Avg Trades": aftertax_row["Avg Trades"],
@@ -118,14 +123,17 @@ if __name__ == "__main__":
             rows.append(row)
 
     lines = [
-        "### Taxable Account — Pre-Tax vs After-Tax (^NDX/3x, 25%/15% rates)",
+        "### Taxable Account — Pre-Tax vs After-Tax Rolling Comparison "
+        "(^NDX/3x, ATR x2.5, 26yr rolling windows, 25%/15% rates)",
         "",
-        "| Setup | Pre-Tax Avg TWR | After-Tax Avg TWR | Tax Drag (pp) | After-Tax Worst DD | Avg Trades | Windows |",
-        "| :--- | ---: | ---: | ---: | ---: | ---: | :--- |",
+        "| Setup | Pre-Tax Avg TWR | After-Tax Avg TWR | After-Tax Med TWR "
+        "| After-Tax Worst TWR | Tax Drag (pp) | After-Tax Worst DD | Avg Trades | Windows |",
+        "| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :--- |",
     ]
     for r in rows:
         lines.append(
             f"| {r['Label']} | {r['Pre-Tax Avg TWR']:.2f}% | {r['After-Tax Avg TWR']:.2f}% "
+            f"| {r['After-Tax Med TWR']:.2f}% | {r['After-Tax Worst TWR']:.2f}% "
             f"| {r['Tax Drag']:+.2f} | {r['After-Tax Worst DD']:.2f}% | {r['Avg Trades']:.0f} "
             f"| {r['n_windows']} ({r['date_range']}) |"
         )
