@@ -86,11 +86,11 @@ SELECTED VELOCITY VARIANT (point_to_point): pct=6%, window=30, cooldown=60
 
 ### Velocity-Stop Rolling Evaluation (^NDX/3x, ATR x2.5, 26yr rolling windows)
 
-| Setup | Avg TWR | Med TWR | Worst TWR | Worst DD | Avg Trades | Windows |
-| :--- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Dual-signal agreement (no stop) | 25.81% | 26.68% | 11.68% | -84.95% | 9 | 172 |
-| Dual-signal agreement + Trailing Stop 8%/60d (peak anchor) | 24.59% | 25.36% | 12.92% | -64.78% | 18 | 172 |
-| S&P 500 signal [T+2] + Velocity Stop rolling_max 6%/60d, cooldown 60d | 18.36% | 18.83% | 11.06% | -58.34% | 30 | 172 |
-| Dual-signal agreement + Velocity Stop rolling_max 6%/60d, cooldown 60d | 19.04% | 19.51% | 11.73% | -58.92% | 29 | 172 |
-| S&P 500 signal [T+2] + Velocity Stop point_to_point 6%/30d, cooldown 60d | 21.58% | 22.40% | 12.87% | -67.52% | 21 | 172 |
-| Dual-signal agreement + Velocity Stop point_to_point 6%/30d, cooldown 60d | 18.88% | 19.22% | 12.57% | -67.64% | 21 | 172 |
+| Setup | Avg TWR | Med TWR | Worst TWR | Worst DD | Worst DD vs Init | Avg Trades | Windows |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Dual-signal agreement (no stop) | 25.81% | 26.68% | 11.68% | -84.95% | -84.95% | 9 | 172 |
+| Dual-signal agreement + Trailing Stop 8%/60d (peak anchor) | 24.59% | 25.36% | 12.92% | -64.78% | -54.75% | 18 | 172 |
+| S&P 500 signal [T+2] + Velocity Stop rolling_max 6%/60d, cooldown 60d | 18.36% | 18.83% | 11.06% | -58.34% | -47.66% | 30 | 172 |
+| Dual-signal agreement + Velocity Stop rolling_max 6%/60d, cooldown 60d | 19.04% | 19.51% | 11.73% | -58.92% | -47.52% | 29 | 172 |
+| S&P 500 signal [T+2] + Velocity Stop point_to_point 6%/30d, cooldown 60d | 21.58% | 22.40% | 12.87% | -67.52% | -53.46% | 21 | 172 |
+| Dual-signal agreement + Velocity Stop point_to_point 6%/30d, cooldown 60d | 18.88% | 19.22% | 12.57% | -67.64% | -53.46% | 21 | 172 |
