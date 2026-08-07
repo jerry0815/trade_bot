@@ -49,6 +49,14 @@ def build_strategies():
         ("D: Dual-signal + GSPC stop 8/60",
          DualSignalAgreement(sma_window=200, atr_multiplier=2.5, t2_confirmation=False,
                              trailing_stop_pct=STOP_PCT, trailing_stop_cooldown_days=STOP_COOLDOWN)),
+        ("E: Dual-signal + GSPC velocity 6%/60d rolling_max",
+         DualSignalAgreement(sma_window=200, atr_multiplier=2.5, t2_confirmation=False,
+                             velocity_stop_pct=0.06, velocity_stop_window=60,
+                             velocity_stop_mode="rolling_max", velocity_stop_cooldown_days=60)),
+        ("F: Dual-signal + GSPC velocity 6%/30d point_to_point",
+         DualSignalAgreement(sma_window=200, atr_multiplier=2.5, t2_confirmation=False,
+                             velocity_stop_pct=0.06, velocity_stop_window=30,
+                             velocity_stop_mode="point_to_point", velocity_stop_cooldown_days=60)),
     ]
 
 
