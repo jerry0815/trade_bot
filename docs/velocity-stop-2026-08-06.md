@@ -66,14 +66,16 @@ E cuts it from -51.11% to -6.45%, F to -43.48%.
 
 **Rolling-return lens** (172-window aggregate, `^NDX`/3x, ATR x2.5):
 
-| Setup | Avg TWR | Med TWR | Worst TWR | Worst DD | Avg Trades | Windows |
-| :--- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Dual-signal agreement (no stop) | 25.81% | 26.68% | 11.68% | -84.95% | 9 | 172 |
-| Dual-signal agreement + peak stop 8%/60d | 24.59% | 25.36% | 12.92% | -64.78% | 18 | 172 |
-| S&P signal [T+2] + velocity rolling_max 6%/60d, 60d cooldown | 18.36% | 18.83% | 11.06% | -58.34% | 30 | 172 |
-| Dual-signal + velocity rolling_max 6%/60d, 60d cooldown | 19.04% | 19.51% | 11.73% | -58.92% | 29 | 172 |
-| S&P signal [T+2] + velocity point_to_point 6%/30d, 60d cooldown | 21.58% | 22.40% | 12.87% | -67.52% | 21 | 172 |
-| Dual-signal + velocity point_to_point 6%/30d, 60d cooldown | 18.88% | 19.22% | 12.57% | -67.64% | 21 | 172 |
+| Setup | Avg TWR | Med TWR | Worst TWR | Worst DD | Worst DD vs Init | Avg Trades | Windows |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Dual-signal agreement (no stop) | 25.81% | 26.68% | 11.68% | -84.95% | -84.95% | 9 | 172 |
+| Dual-signal agreement + peak stop 8%/60d | 24.59% | 25.36% | 12.92% | -64.78% | -54.75% | 18 | 172 |
+| S&P signal [T+2] + velocity rolling_max 6%/60d, 60d cooldown | 18.36% | 18.83% | 11.06% | -58.34% | -47.66% | 30 | 172 |
+| Dual-signal + velocity rolling_max 6%/60d, 60d cooldown | 19.04% | 19.51% | 11.73% | -58.92% | -47.52% | 29 | 172 |
+| S&P signal [T+2] + velocity point_to_point 6%/30d, 60d cooldown | 21.58% | 22.40% | 12.87% | -67.52% | -53.46% | 21 | 172 |
+| Dual-signal + velocity point_to_point 6%/30d, 60d cooldown | 18.88% | 19.22% | 12.57% | -67.64% | -53.46% | 21 | 172 |
+
+(Worst DD vs Init = deepest dip below the starting $10k; see the README methodology note. The velocity rolling_max variant posts the shallowest loss-on-principal of any setup here, -47.5%, even better than the peak stop's -54.75% — consistent with it being the most conservative, most-traded variant.)
 
 Velocity Avg TWR clusters 18.36%-21.58%, well below the peak stop's 24.59%
 and the no-stop baseline's 25.81%. Trade counts (21-30) are also *higher*

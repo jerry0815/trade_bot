@@ -109,6 +109,7 @@ def run_setup(label, strat_factory, signal_ticker):
         "After-Tax Worst TWR": aftertax_row["Worst TWR"],
         "Tax Drag": pretax_row["Avg TWR"] - aftertax_row["Avg TWR"],
         "After-Tax Worst DD": aftertax_row["Worst DD"],
+        "After-Tax Worst DD vs Initial": aftertax_row["Worst DD vs Initial"],
         "Avg Trades": aftertax_row["Avg Trades"],
         "n_windows": len(aftertax_df),
         "date_range": date_range,
@@ -127,14 +128,16 @@ if __name__ == "__main__":
         "(^NDX/3x, ATR x2.5, 26yr rolling windows, 25%/15% rates)",
         "",
         "| Setup | Pre-Tax Avg TWR | After-Tax Avg TWR | After-Tax Med TWR "
-        "| After-Tax Worst TWR | Tax Drag (pp) | After-Tax Worst DD | Avg Trades | Windows |",
-        "| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :--- |",
+        "| After-Tax Worst TWR | Tax Drag (pp) | After-Tax Worst DD "
+        "| After-Tax Worst DD vs Init | Avg Trades | Windows |",
+        "| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :--- |",
     ]
     for r in rows:
         lines.append(
             f"| {r['Label']} | {r['Pre-Tax Avg TWR']:.2f}% | {r['After-Tax Avg TWR']:.2f}% "
             f"| {r['After-Tax Med TWR']:.2f}% | {r['After-Tax Worst TWR']:.2f}% "
-            f"| {r['Tax Drag']:+.2f} | {r['After-Tax Worst DD']:.2f}% | {r['Avg Trades']:.0f} "
+            f"| {r['Tax Drag']:+.2f} | {r['After-Tax Worst DD']:.2f}% "
+            f"| {r['After-Tax Worst DD vs Initial']:.2f}% | {r['Avg Trades']:.0f} "
             f"| {r['n_windows']} ({r['date_range']}) |"
         )
     output = "\n".join(lines)

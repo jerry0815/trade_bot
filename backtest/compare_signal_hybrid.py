@@ -86,13 +86,14 @@ if __name__ == "__main__":
     lines = [
         "### NDX Signal vs S&P 500 Signal vs Dual-Signal Agreement (ATR x2.5, 3x Leverage)",
         "",
-        "| Setup | Avg TWR | Med TWR | Worst TWR | Worst DD | Avg Trades | Windows |",
-        "| :--- | ---: | ---: | ---: | ---: | ---: | :--- |",
+        "| Setup | Avg TWR | Med TWR | Worst TWR | Worst DD | Worst DD vs Init | Avg Trades | Windows |",
+        "| :--- | ---: | ---: | ---: | ---: | ---: | ---: | :--- |",
     ]
     for r in rows:
         lines.append(
             f"| {r['Label']} | {r['Avg TWR']:.2f}% | {r['Med TWR']:.2f}% | {r['Worst TWR']:.2f}% "
-            f"| {r['Worst DD']:.2f}% | {r['Avg Trades']:.0f} | {r['n_windows']} ({r['date_range']}) |"
+            f"| {r['Worst DD']:.2f}% | {r['Worst DD vs Initial']:.2f}% | {r['Avg Trades']:.0f} "
+            f"| {r['n_windows']} ({r['date_range']}) |"
         )
     output = "\n".join(lines)
     print("\n" + output)

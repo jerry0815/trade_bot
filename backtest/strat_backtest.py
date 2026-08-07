@@ -1054,6 +1054,15 @@ class Backtester:
             "final_value"    : portfolio_value,
             "total_invested" : total_principal,
             "max_drawdown"   : max_drawdown * 100,
+            # Alternative drawdown metric: worst equity relative to the INITIAL
+            # fund (how far below the money originally put in the account ever
+            # fell), vs max_drawdown's running-peak-to-trough. <= 0 always; 0
+            # means the account never dipped below its starting capital.
+            # min_value is initialised to initial_fund and only ratchets down,
+            # so this is exactly min(0, lowest_equity/initial - 1). Meaningful
+            # for lump-sum runs (annual_dca=0); with DCA the initial fund is
+            # only the first contribution, so read it accordingly.
+            "max_dd_vs_initial": (min_value / self.initial_fund - 1) * 100,
             # Use actual trading days for annualisation — more accurate than
             # configured period_years when data has gaps or partial years.
             "strategy_twr"   : ((twr_index ** (252 / len(df))) - 1) * 100,
@@ -1170,6 +1179,7 @@ class RollingBacktester:
                     return None  # Missing data — skip this date
                 row_data[f"{strat.name} {metric_label} (%)"] = res[metric_key]
                 row_data[f"{strat.name} Max DD (%)"]          = res["max_drawdown"]
+                row_data[f"{strat.name} Max DD vs Initial (%)"] = res.get("max_dd_vs_initial", 0.0)
                 row_data[f"{strat.name} Total Trades"]        = res.get("total_trades", 0)
             return row_data
 
@@ -1284,6 +1294,7 @@ def summarize_rolling_results(df_res, strategies, metric_label="TWR"):
     for strat in strategies:
         ret_col = f"{strat.name} {metric_label} (%)"
         dd_col = f"{strat.name} Max DD (%)"
+        ddvi_col = f"{strat.name} Max DD vs Initial (%)"
         trades_col = f"{strat.name} Total Trades"
         if ret_col not in df_res.columns:
             continue
@@ -1296,6 +1307,10 @@ def summarize_rolling_results(df_res, strategies, metric_label="TWR"):
             # for this strategy — independent of which window had the worst
             # TWR. Matches this same file's print-summary convention above.
             "Worst DD": df_res[dd_col].min(),
+            # Worst DD vs Initial: deepest dip below the starting capital across
+            # all windows (0 if no window ever went below initial). Absent from
+            # older result frames, so default gracefully.
+            "Worst DD vs Initial": df_res[ddvi_col].min() if ddvi_col in df_res.columns else float("nan"),
             "Avg Trades": df_res[trades_col].mean(),
         })
     return rows

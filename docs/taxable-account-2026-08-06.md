@@ -27,12 +27,12 @@ Each setup is run through the full 26-year monthly rolling suite twice
 distribution — average, median, and worst-case window TWR across all 172
 windows — not a single run.
 
-| Setup | Pre-Tax Avg TWR | After-Tax Avg TWR | After-Tax Med TWR | After-Tax Worst TWR | Tax Drag (pp) | After-Tax Worst DD | Avg Trades |
-| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| S&P-signal [T+2] | 21.77% | 18.92% | 19.26% | 6.34% | +2.84 | -83.86% | 11 |
-| S&P-signal [T+2] + peak stop 8/60 | 23.43% | 18.91% | 19.18% | 9.50% | +4.51 | -66.45% | 18 |
-| Dual-signal | 25.81% | 23.61% | 24.24% | 9.56% | +2.19 | -87.57% | 9 |
-| Dual-signal + peak stop 8/60 | 24.59% | 19.82% | 20.38% | 10.01% | +4.78 | -67.36% | 18 |
+| Setup | Pre-Tax Avg TWR | After-Tax Avg TWR | After-Tax Med TWR | After-Tax Worst TWR | Tax Drag (pp) | After-Tax Worst DD | After-Tax Worst DD vs Init | Avg Trades |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| S&P-signal [T+2] | 21.77% | 18.92% | 19.26% | 6.34% | +2.84 | -83.86% | -83.86% | 11 |
+| S&P-signal [T+2] + peak stop 8/60 | 23.43% | 18.91% | 19.18% | 9.50% | +4.51 | -66.45% | -56.26% | 18 |
+| Dual-signal | 25.81% | 23.61% | 24.24% | 9.56% | +2.19 | -87.57% | -85.45% | 9 |
+| Dual-signal + peak stop 8/60 | 24.59% | 19.82% | 20.38% | 10.01% | +4.78 | -67.36% | -56.28% | 18 |
 
 The pre-tax column reproduces Table 4's numbers for these four setups
 exactly (21.77% / 23.43% / 25.81% / 24.59%). The after-tax **median** tracks

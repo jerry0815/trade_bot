@@ -164,13 +164,13 @@ def render_evaluation_table(rows):
     lines = [
         "### Velocity-Stop Rolling Evaluation (^NDX/3x, ATR x2.5, 26yr rolling windows)",
         "",
-        "| Setup | Avg TWR | Med TWR | Worst TWR | Worst DD | Avg Trades | Windows |",
-        "| :--- | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| Setup | Avg TWR | Med TWR | Worst TWR | Worst DD | Worst DD vs Init | Avg Trades | Windows |",
+        "| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for r in rows:
         lines.append(
             f"| {r['Label']} | {r['Avg TWR']:.2f}% | {r['Med TWR']:.2f}% | {r['Worst TWR']:.2f}% "
-            f"| {r['Worst DD']:.2f}% | {r['Avg Trades']:.0f} | {r['n_windows']} |"
+            f"| {r['Worst DD']:.2f}% | {r['Worst DD vs Initial']:.2f}% | {r['Avg Trades']:.0f} | {r['n_windows']} |"
         )
     return "\n".join(lines)
 
