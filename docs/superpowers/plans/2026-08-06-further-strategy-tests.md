@@ -72,13 +72,17 @@ def test_lookahead_free_exit_lags_one_day():
 
 
 def test_point_to_point_ignores_shallow_intrawindow_drop():
-    # 94 vs the 3-days-earlier value (101) is only -6.9% -> no p2p trigger,
-    # even though rolling_max (peak 103) would fire on the same series.
+    # At the day rolling_max fires (index 5: 94 vs the 103 peak reached 2 days
+    # earlier), point_to_point compares against close[1]=101 (exactly `window`
+    # days back) -> only -6.9%, so it does NOT fire there. This is the mode
+    # difference at the peak-relative moment. (A later window-spaced drop in the
+    # flat 94 tail can still trigger p2p, so we assert the index-5 contrast, not
+    # lifelong immunity.)
     prices = [100, 101, 102, 103, 94, 94, 94, 94, 94]
     rmax = _run(prices, [True] * 9, 0.08, 3, "rolling_max", 2)
     p2p = _run(prices, [True] * 9, 0.08, 3, "point_to_point", 2)
-    assert rmax[5] is False       # rolling_max exited
-    assert all(p2p)               # point_to_point never exited
+    assert rmax[5] is False       # rolling_max exited at the peak-relative drop
+    assert p2p[5] is True         # point_to_point did not fire at index 5
 
 
 def test_point_to_point_triggers_on_deep_window_drop():
