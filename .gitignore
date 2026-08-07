@@ -22,3 +22,4 @@ backtest/trailing_stop_dual_signal_output.md
 backtest/trailing_stop_dual_breach_output.md
 backtest/combined_system_comparison_output.md
 backtest/crash_event_drawdown_output.md
+backtest/qqq_strategy_sweep_output.md
