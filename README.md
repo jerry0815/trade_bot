@@ -44,7 +44,7 @@ flowchart LR
     Cool -->|60 days elapse| Cash
 ```
 
-The **recommended action** is "in the market" only when both indices agree bullish **and** the trailing stop has not fired. Full validation of the trailing stop — out-of-sample generalization, parameter stability, execution cost, and crash-event behavior — lives in the [`docs/`](docs/) finding chain (`docs/trailing-stop-*`, `docs/combined-system-comparison-2026-08-03.md`).
+The **recommended action** is "in the market" only when both indices agree bullish **and** the trailing stop has not fired. The daily report prints this action twice — once for a **tax-advantaged account** (with the trailing stop) and once for a **taxable account** (dual-signal only, *without* the stop), because Table 8 shows the stop's extra turnover is a net-negative return trade after tax. Full validation of the trailing stop — out-of-sample generalization, parameter stability, execution cost, and crash-event behavior — lives in the [`docs/`](docs/) finding chain (`docs/trailing-stop-*`, `docs/combined-system-comparison-2026-08-03.md`).
 
 ---
 
@@ -59,6 +59,10 @@ All results below are produced by rolling 26-year backtests stepped forward **mo
 - **Cash yield** — idle cash earns 80% of the prevailing borrow rate (money-market proxy)
 - **Parallel computation** — all rolling windows run concurrently via `ThreadPoolExecutor`
 
+**Two drawdown metrics** (both reported in the rolling tables below):
+- **Worst DD** — the deepest **peak-to-trough** decline (trough ÷ the strategy's own *running peak* − 1). Measures giving back accumulated *paper gains*.
+- **Worst DD vs Init** — the deepest dip below the **initial $10,000** (lowest equity ÷ *starting capital* − 1; 0 means a window never went below the money put in). Measures losing your *own principal*. For a strategy that has compounded a lot, Worst DD can be far deeper than Worst DD vs Init — the difference is gains-given-back vs. principal-lost. The gap is near-zero for setups whose worst window starts right before a crash (no gains banked yet — pure sequence risk).
+
 **Backtest Parameters:**
 - Rolling period: **26 years** per window
 - Initial investment: **$10,000 lump sum** (no DCA)
@@ -70,7 +74,10 @@ All results below are produced by rolling 26-year backtests stepped forward **mo
 
 - **Tables 1–3** — strategy comparison (SMA 200 vs EMA 50/200 vs Buy & Hold vs VIX/RSI) across signal sources and leverage tiers.
 - **Table 4** — signal-source comparison (NDX vs S&P 500 vs dual-signal agreement), plus the trailing-stop overlay on the two most relevant setups.
-- **Table 5** — drawdown by crash event, per strategy.
+- **Table 5** — drawdown by crash event, per strategy (now including the velocity-stop rows E/F).
+- **Table 6** — velocity (fixed-window) stop vs. the peak-based trailing stop, on both the rolling-return and crash-event lenses.
+- **Table 7** — QQQ (1x) strategy comparison, cross-validating Table 1's 1x tier and adding dual-signal/trailing-stop rows.
+- **Table 8** — taxable account: pre-tax vs. after-tax returns for the peak stop vs. no stop.
 
 ### Table 1: NASDAQ-100 (^NDX) — Lump Sum Performance
 *Date range: 1986-04-29 to 2000-07-28 (172 rolling windows)*
@@ -162,7 +169,7 @@ All results below are produced by rolling 26-year backtests stepped forward **mo
 
 ---
 
-### Table 4: 3x TQQQ — Signal Source Comparison (NDX vs S&P 500 vs Dual-Signal Agreement), with Trailing-Stop Overlay
+### Table 4: 3x ^NDX (TQQQ) — Signal Source Comparison (NDX vs S&P 500 vs Dual-Signal Agreement), with Trailing-Stop Overlay
 *^NDX base, 3x leverage, SMA 200 (ATR x2.5 — `bot.py`'s current default) only. Compares three ways to generate the trend signal — NDX's own trend, the S&P 500's trend, and a "dual-signal agreement" hybrid that only acts when both trends agree — each with and without T+2 confirmation. The last two rows add an opt-in ^GSPC trailing stop (8% below peak since entry, 60-day re-entry cooldown) to the two most relevant setups.*
 *Date range: 1986-04-29 to 2000-07-28 (172 rolling windows).*
 
@@ -172,33 +179,98 @@ All results below are produced by rolling 26-year backtests stepped forward **mo
 >
 > **The trailing-stop overlay (last two rows) buys the lowest drawdown in the table** — Worst DD -64.78% vs. -83% to -85% for every no-stop setup — for roughly double the trading (9-11 -> 18 trades) and a near-flat return effect (S&P+T+2 22% -> 23%; dual-signal 26% -> 25%). Its full validation — out-of-sample generalization, parameter stability, execution-cost, and event-relative behavior — lives in the `docs/trailing-stop-*` and `docs/combined-system-comparison-2026-08-03.md` finding chain, which is why it is presented here as an overlay on the two most relevant setups rather than swept across all six.
 
-| Setup | Avg TWR | Med TWR | Worst TWR | Worst DD | Avg Trades |
-| :--- | ---: | ---: | ---: | ---: | ---: |
-| NDX own signal | 23.53% | 24.25% | 10.53% | -81.38% | 15 |
-| NDX own signal [T+2] | 23.33% | 24.25% | 11.21% | -84.99% | 13 |
-| S&P 500 signal | 23.56% | 23.95% | 12.04% | -83.79% | 12 |
-| S&P 500 signal [T+2] | 21.77% | 22.13% | 8.31% | -83.40% | 11 |
-| **Dual-signal agreement** | **25.81%** | **26.68%** | 11.68% | -84.95% | **9** |
-| Dual-signal agreement [T+2] | 24.16% | 25.24% | 9.41% | -85.50% | 9 |
-| S&P 500 signal [T+2] + Trailing Stop 8%/60d | 23.43% | 23.92% | 12.30% | **-64.78%** | 18 |
-| Dual-signal agreement + Trailing Stop 8%/60d | 24.59% | 25.36% | 12.92% | **-64.78%** | 18 |
+| Setup | Avg TWR | Med TWR | Worst TWR | Worst DD | Worst DD vs Init | Avg Trades |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: |
+| NDX own signal | 23.53% | 24.25% | 10.53% | -81.38% | -81.38% | 15 |
+| NDX own signal [T+2] | 23.33% | 24.25% | 11.21% | -84.99% | -84.75% | 13 |
+| S&P 500 signal | 23.56% | 23.95% | 12.04% | -83.79% | -83.79% | 12 |
+| S&P 500 signal [T+2] | 21.77% | 22.13% | 8.31% | -83.40% | -83.40% | 11 |
+| **Dual-signal agreement** | **25.81%** | **26.68%** | 11.68% | -84.95% | -84.95% | **9** |
+| Dual-signal agreement [T+2] | 24.16% | 25.24% | 9.41% | -85.50% | -85.27% | 9 |
+| S&P 500 signal [T+2] + Trailing Stop 8%/60d | 23.43% | 23.92% | 12.30% | **-64.78%** | -54.76% | 18 |
+| Dual-signal agreement + Trailing Stop 8%/60d | 24.59% | 25.36% | 12.92% | **-64.78%** | -54.75% | 18 |
 
 > **Caveats, and how this table differs from the version it replaced:** this run is a single ATR value (2.5, `bot.py`'s current default) and SMA only — unlike the version of this table it replaced, it does not sweep ATR or test EMA (that data is preserved in `CHANGELOG.md`'s history if needed). It has also had lighter review than the rest of this README: `DualSignalAgreement` (`backtest/strat_backtest.py`) is new code, verified by hand-tracing its logic, confirming ^NDX's trading calendar is a strict subset of ^GSPC's (no date-alignment gaps), and cross-validating this table's NDX-own and S&P-signal rows against Table 1 and Table 3's already-published, independently-reviewed numbers (both matched exactly) — but the dual-signal logic itself has not been through the same multi-round adversarial review the rest of this README's findings have. The usual overlapping-window caveat also applies: 172 monthly-stepped windows share nearly all their history with their neighbors, so this is much less independent evidence than "172" suggests, and this is a single run — not itself checked for parameter stability or out-of-sample generalization the way earlier findings in this README were.
 
 ---
 
-### Table 5: 3x TQQQ — Drawdown by Crash Event (Event-Relative Peak-to-Trough)
+### Table 5: 3x ^NDX (TQQQ) — Drawdown by Crash Event (Event-Relative Peak-to-Trough)
 *^NDX base, 3x leverage, S&P 500 signal. Each cell is the equity decline from just before the event to the local trough within the event window — a direct read of how the Table 4 setups weathered the five worst crashes in the sample. Less negative = better protected. Generated by `backtest/crash_event_drawdown.py`.*
 
-> **The trailing stop is the single largest drawdown reducer in every crash**, and it helps all five with none worsened: Black Monday -66% -> -20%, dot-com -83% -> -51%, COVID -70% -> -43%. **Buy & Hold at 3x is ruinous** — the dot-com crash took it to -99.95% (near-total wipeout), the floor the trend rules improve on. The two stopped setups are nearly identical (the ^GSPC stop dominates the crash profile regardless of entry rule; only 2008 differs), and dual-signal without a stop is slightly *worse* than the S&P signal in 2008/2022 — the higher-return, higher-drawdown trade the stop then closes.
+> **The trailing stop is the single largest drawdown reducer in every crash**, and it helps all five with none worsened: Black Monday -66% -> -20%, dot-com -83% -> -51%, COVID -70% -> -43%. **Buy & Hold at 3x is ruinous** — the dot-com crash took it to -99.95% (near-total wipeout), the floor the trend rules improve on. The two stopped setups are nearly identical (the ^GSPC stop dominates the crash profile regardless of entry rule; only 2008 differs), and dual-signal without a stop is slightly *worse* than the S&P signal in 2008/2022 — the higher-return, higher-drawdown trade the stop then closes. Rows E and F add the velocity (fixed-window) stop; see [Table 6](#table-6-velocity-fixed-window-stop-vs-peak-based-stop) for the read across both this crash-event lens and the rolling-return lens.
 
 | Setup | Black Monday 1987 | Dot-com crash | 2008 GFC | COVID crash | 2022 rate-shock bear |
 | :--- | ---: | ---: | ---: | ---: | ---: |
 | Buy & Hold (3x) | -83.66% | -99.95% | -94.57% | -69.96% | -80.15% |
-| S&P 500 signal [T+2] (baseline) | -65.91% | -83.25% | -31.77% | -69.61% | -51.69% |
-| S&P 500 signal [T+2] + Trailing Stop 8%/60d | **-19.55%** | **-51.11%** | **-17.95%** | **-42.69%** | **-38.06%** |
-| Dual-signal agreement | -65.91% | -83.65% | -43.69% | -69.96% | -53.33% |
-| Dual-signal agreement + Trailing Stop 8%/60d | -19.55% | -51.11% | -23.88% | -42.69% | -38.06% |
+| A: S&P 500 signal [T+2] (baseline) | -65.91% | -83.25% | -31.77% | -69.61% | -51.69% |
+| B: S&P 500 signal [T+2] + Trailing Stop 8%/60d | **-19.55%** | **-51.11%** | **-17.95%** | **-42.69%** | **-38.06%** |
+| C: Dual-signal agreement | -65.91% | -83.65% | -43.69% | -69.96% | -53.33% |
+| D: Dual-signal agreement + Trailing Stop 8%/60d | -19.55% | -51.11% | -23.88% | -42.69% | -38.06% |
+| E: Dual-signal agreement + Velocity Stop 6%/60d rolling_max | -15.47% | **-6.45%** | -21.42% | **-25.58%** | -30.03% |
+| F: Dual-signal agreement + Velocity Stop 6%/30d point_to_point | -19.55% | -43.48% | **-11.16%** | -42.69% | -38.06% |
+
+---
+
+### Table 6: Velocity (Fixed-Window) Stop vs. Peak-Based Stop
+*^NDX base, 3x leverage, ^GSPC reference. The peak-based trailing stop (Tables 4/5) exits when price falls a fixed pct below the running peak since entry. The velocity stop instead measures decline over a fixed trailing window instead of since-entry — `rolling_max` compares the latest close against the window's own max, `point_to_point` compares it against the close exactly `window` days earlier — testing whether a faster, window-bounded read catches sharp ("crazy") bears without over-reacting to slow ones. Winners selected from a 72-variant grid (mode x window x pct x cooldown) ranked by improvement over baseline event decline (`backtest/velocity_stop_sweep.py`): **rolling_max 6%/60d-window/60d-cooldown** and **point_to_point 6%/30d-window/60d-cooldown**.*
+
+> **Crash-event lens (Table 5, rows E/F vs. D): the velocity stop does not leak on slow bears — the opposite of the a-priori hypothesis.** The worry going in was that a fixed-window stop, built to catch fast crashes, would fail to trigger on slower-grinding bears like dot-com (1999-2000) and 2022. It didn't: rolling_max (E) is dramatically better than the peak stop (D) on dot-com (-6.45% vs. -51.11%) and better on 2022 (-30.03% vs. -38.06%); point_to_point (F) also beats D on dot-com (-43.48% vs. -51.11%) and matches it exactly on 2022 (-38.06%). Both velocity variants match or beat the peak stop on all five crash events, not just these two.
+>
+> **Rolling-return lens (172-window aggregate below): the velocity stop underperforms the peak stop, and the trade-off is real, not free.** Avg TWR for the velocity variants clusters at 18.36%-21.58%, versus 24.59% for the peak stop and 25.81% for the dual-signal baseline with no stop at all — a return cost roughly 3-6x the peak stop's own (already-flat-to-negative) cost. It also trades *more* often (21-30 trades vs. the peak stop's 18, and dual-signal-no-stop's 9), not less — so the a-priori "does it whipsaw less" half of the question resolves **no**: the velocity stop does not reduce trading frequency; if anything it increases it.
+>
+> **Net read: the velocity stop is not a strictly better version of the peak stop — it is a more conservative one.** It buys equal-or-better crash protection at a real, larger compounding cost, with more trades along the way. Whether that trade is worth it depends on how much weight is put on tail protection during the specific slow-bear scenarios (dot-com, 2022) the peak stop already handles reasonably well.
+
+| Setup | Avg TWR | Med TWR | Worst TWR | Worst DD | Worst DD vs Init | Avg Trades | Windows |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Dual-signal agreement (no stop) | **25.81%** | 26.68% | 11.68% | -84.95% | -84.95% | **9** | 172 |
+| Dual-signal agreement + Trailing Stop 8%/60d (peak anchor) | 24.59% | 25.36% | 12.92% | -64.78% | -54.75% | 18 | 172 |
+| S&P 500 signal [T+2] + Velocity Stop rolling_max 6%/60d, cooldown 60d | 18.36% | 18.83% | 11.06% | **-58.34%** | **-47.66%** | 30 | 172 |
+| Dual-signal agreement + Velocity Stop rolling_max 6%/60d, cooldown 60d | 19.04% | 19.51% | 11.73% | -58.92% | **-47.52%** | 29 | 172 |
+| S&P 500 signal [T+2] + Velocity Stop point_to_point 6%/30d, cooldown 60d | 21.58% | 22.40% | 12.87% | -67.52% | -53.46% | 21 | 172 |
+| Dual-signal agreement + Velocity Stop point_to_point 6%/30d, cooldown 60d | 18.88% | 19.22% | 12.57% | -67.64% | -53.46% | 21 | 172 |
+
+> **Caveats:** the rolling_max window (60d) is a tie-break artifact, not a meaningfully selected value — windows 20d/30d/60d produced *identical* event-decline results at 6%/60d-cooldown (see `backtest/velocity_stop_sweep_output.md`), because the rolling max over any of those windows was set by the same peak day in each test crash. Treat "60d" as "any of 20/30/60d gave the same answer here," not as evidence 60d is special. This is a single selection run, not checked for out-of-sample generalization or parameter stability the way the peak stop's `docs/trailing-stop-*` chain was — same bar as the Table 4 caveat. `_apply_velocity_stop` (`backtest/strat_backtest.py`) is new code, unit-tested and hand-traced for lookahead-freedom, but has not been through the multi-round adversarial review the rest of this README's findings have. The usual overlapping-window caveat applies: 172 monthly-stepped windows share nearly all their history with their neighbors. Full write-up: [`docs/velocity-stop-2026-08-06.md`](docs/velocity-stop-2026-08-06.md).
+
+---
+
+### Table 7: QQQ (1x) — Strategy Comparison
+*^NDX base at 1x, scaled to QQQ's 0.20% expense ratio (same convention as Table 1's 1x tier — see caveats below), SMA 200 (ATR x2.5). Date range: 1986-04-29 to 2000-07-28 (172 rolling windows). Generated by `backtest/qqq_strategy_sweep.py`.*
+
+> **The Buy & Hold and NDX-own[T+2] rows are a validation, not new information: they reproduce Table 1's 1x tier exactly** (Buy & Hold 11.65%, NDX own signal [T+2] 13.89%) — Table 1's 1x tier already runs on QQQ's 0.20% expense ratio, so this table and that one are the same computation seen twice. The genuinely new data here is the dual-signal and trailing-stop rows, which Table 1 never tested at 1x. **Dual-signal agreement (no T+2) is the best setup in the table** at 14.69% Avg TWR with only 9 trades — beating every single-signal variant and Buy & Hold, consistent with Table 4's 3x finding that dual-signal agreement is the strongest signal-generation rule. The trailing stop, as elsewhere, trades return for a shallower floor: Worst DD improves from -35.77% (no stop) to -24.94% (with stop) at the cost of ~2pp Avg TWR and roughly double the trades (9-11 -> 18).
+
+| Setup | Avg TWR | Med TWR | Worst TWR | Worst DD | Avg Trades |
+| :--- | ---: | ---: | ---: | ---: | ---: |
+| Buy & Hold | 11.65% | 12.06% | 6.12% | -82.99% | 1 |
+| NDX own signal | 13.93% | 14.19% | 8.48% | -35.77% | 15 |
+| NDX own signal [T+2] | 13.89% | 14.10% | 8.70% | -35.77% | 13 |
+| S&P 500 signal | 13.61% | 13.93% | 8.64% | -35.77% | 12 |
+| S&P 500 signal [T+2] | 13.21% | 13.74% | 7.68% | -35.77% | 11 |
+| **Dual-signal agreement** | **14.69%** | **14.91%** | **8.89%** | -35.77% | **9** |
+| Dual-signal agreement [T+2] | 14.23% | 14.49% | 8.21% | -37.84% | 9 |
+| S&P 500 signal [T+2] + Trailing Stop 8%/60d | 12.52% | 13.02% | 7.64% | **-24.94%** | 18 |
+| Dual-signal agreement + Trailing Stop 8%/60d | 12.89% | 13.36% | 8.05% | **-24.94%** | 18 |
+
+> **Caveats:** this uses `^NDX` index data scaled to QQQ's 0.20% expense ratio, not QQQ's own post-1999 price history (QQQ itself didn't exist before 1999, so the full 1986-2000 rolling-window range is only reachable via the index proxy — consistent with how the rest of this README's 1x tier is computed). Overlapping-window caveat applies. Full write-up: [`docs/qqq-1x-comparison-2026-08-06.md`](docs/qqq-1x-comparison-2026-08-06.md).
+
+---
+
+### Table 8: Taxable Account — Pre-Tax vs. After-Tax (Rolling)
+*^NDX base, 3x leverage, S&P 500 signal and dual-signal entries, with and without the peak-based trailing stop (8%/60d). Each setup is run through the full 26-year monthly rolling suite twice (pre-tax and after-tax), so the after-tax columns report the rolling distribution — average, median, and worst-case window TWR — not a single run. Tax applied via the engine's existing `apply_tax=True` feature: 25% short-term / 15% long-term capital-gains rate on every position exit (engine defaults). Date range: 1986-04-29 to 2000-07-28 (172 rolling windows). Generated by `backtest/taxable_account_comparison.py`.*
+
+> **The pre-tax columns match Table 4 exactly (21.77% / 23.43% / 25.81% / 24.59%) — this table's news is entirely in the after-tax column.** After tax, the peak stop's return advantage over no-stop **disappears, and inverts for the dual-signal pair**: S&P+stop falls to 18.91% after-tax, essentially tied with S&P-no-stop's 18.92% (a wash, not an edge); dual+stop falls to 19.82% after-tax, now **below** dual-no-stop's 23.61% — the stop actively costs money once tax is realistic. The mechanism is turnover: tax drag is roughly double for the stopped setups (+4.51pp, +4.78pp) versus the no-stop setups (+2.84pp, +2.19pp), because the stop's extra entry/exit cycles (18 trades vs. 9-11) realize more gains at the higher 25% short-term rate instead of letting them compound untaxed or ride to the 15% long-term rate.
+>
+> **The rolling distribution refines the story:** the after-tax **median** tracks the average closely (no single window skews it), and the after-tax **worst-case window TWR** is actually *higher* with the stop than without (6.34% -> 9.50% for the S&P pair, 9.56% -> 10.01% for the dual pair) — i.e. the stop lifts the bad-window floor even as it lowers the average, the same capital-preservation-over-compounding trade seen in drawdown terms.
+>
+> **Conclusion: in a taxable account, the peak stop's value is drawdown reduction and a higher worst-case floor — not average return, and after tax it's a net-negative average-return trade for the dual-signal pair specifically.** The stop still cuts After-Tax Worst DD sharply (-83.86%/-87.57% -> -66.45%/-67.36%), so the crash-protection case from Tables 4/5 stands; the average-return case for the stop, already flat-to-negative pre-tax, gets worse once realistic tax is applied.
+
+| Setup | Pre-Tax Avg TWR | After-Tax Avg TWR | After-Tax Med TWR | After-Tax Worst TWR | Tax Drag (pp) | After-Tax Worst DD | After-Tax Worst DD vs Init | Avg Trades |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| S&P-signal [T+2] | 21.77% | 18.92% | 19.26% | 6.34% | +2.84 | -83.86% | -83.86% | 11 |
+| S&P-signal [T+2] + peak stop 8/60 | 23.43% | 18.91% | 19.18% | **9.50%** | +4.51 | **-66.45%** | -56.26% | 18 |
+| Dual-signal | **25.81%** | **23.61%** | **24.24%** | 9.56% | +2.19 | -87.57% | -85.45% | 9 |
+| Dual-signal + peak stop 8/60 | 24.59% | 19.82% | 20.38% | **10.01%** | +4.78 | **-67.36%** | -56.28% | 18 |
+
+> **Caveats:** fixed 25% short-term / 15% long-term rates (engine defaults) — actual rates vary by bracket, jurisdiction, and holding-period edge cases not modeled here. Overlapping-window caveat applies. Full write-up: [`docs/taxable-account-2026-08-06.md`](docs/taxable-account-2026-08-06.md).
 
 ---
 

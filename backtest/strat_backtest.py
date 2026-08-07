@@ -305,6 +305,68 @@ class BaseStrategy:
 
         return pd.Series(final, index=df.index)
 
+    def _apply_velocity_stop(self, df, price=None):
+        """Fixed-window ("velocity") stop: exits when the reference price has
+        fallen velocity_stop_pct within a trailing window of
+        velocity_stop_window trading days, rather than from the running peak
+        since entry. Two modes:
+          - "rolling_max": breach when the lagged close is velocity_stop_pct
+            below the MAX lagged close over the trailing window.
+          - "point_to_point": breach when the lagged close is velocity_stop_pct
+            below the lagged close velocity_stop_window trading days earlier.
+
+        Lookahead-free by construction (same lag convention as
+        _apply_trailing_stop): every read below uses close_lagged, i.e.
+        close[i-1] and earlier, never close[i]. Cooldown and precedence match
+        _apply_trailing_stop: a trend-signal exit wins over a breach on the
+        same day and does NOT start a cooldown; only a stop breach does. The
+        window spans the trailing price series regardless of entry date (a
+        market-velocity measure); the stop only APPLIES while in a position,
+        and never triggers on the entry day itself (mirrors the peak stop's
+        hold-on-entry behavior)."""
+        trend_in_market = df['in_market'].to_numpy()
+        close = (df['Close'] if price is None else price).to_numpy()
+        close_lagged = np.roll(close, 1)
+        if len(close_lagged):
+            close_lagged[0] = close[0]
+        n = len(df)
+        window = self.velocity_stop_window
+        pct = self.velocity_stop_pct
+        mode = self.velocity_stop_mode
+        final = np.zeros(n, dtype=bool)
+
+        was_in = False
+        cooldown = 0
+        for i in range(n):
+            if cooldown > 0:
+                final[i] = False
+                cooldown -= 1
+                was_in = False
+                continue
+            if not trend_in_market[i]:
+                final[i] = False
+                was_in = False
+                continue
+            if not was_in:
+                was_in = True
+                final[i] = True
+                continue
+            if mode == "point_to_point":
+                j = i - window
+                breached = j >= 0 and close_lagged[i] < close_lagged[j] * (1 - pct)
+            else:  # rolling_max
+                lo = max(0, i - window + 1)
+                ref = close_lagged[lo:i + 1].max()
+                breached = close_lagged[i] < ref * (1 - pct)
+            if breached:
+                final[i] = False
+                was_in = False
+                cooldown = self.velocity_stop_cooldown_days
+            else:
+                final[i] = True
+
+        return pd.Series(final, index=df.index)
+
     def _trailing_stop_status(self, df, price=None):
         """Current stop state for live reporting. Re-walks the same peak/
         cooldown logic as _apply_trailing_stop over df['trend_in_market']
@@ -380,7 +442,9 @@ class BuyAndHold(BaseStrategy):
 class SMATrendFollowing(BaseStrategy):
     def __init__(self, sma_window=200, buffer_pct=None, atr_multiplier=2.5, t2_confirmation=False,
                  vix_threshold=None, atr_spike_multiplier=None, atr_spike_lookback=60,
-                 sma_slope_lookback=None, trailing_stop_pct=None, trailing_stop_cooldown_days=20):
+                 sma_slope_lookback=None, trailing_stop_pct=None, trailing_stop_cooldown_days=20,
+                 velocity_stop_pct=None, velocity_stop_window=30, velocity_stop_mode="rolling_max",
+                 velocity_stop_cooldown_days=60):
         # We handle naming and initialization cleanly
         name = f"SMA {sma_window} - " + (f"Static {buffer_pct*100}% Buffer" if buffer_pct else f"ATR Buffer (x{atr_multiplier})")
         if t2_confirmation:
@@ -396,6 +460,10 @@ class SMATrendFollowing(BaseStrategy):
             # and 0.08) would render to the same string and silently collide in
             # RollingBacktester's strategy-name-keyed columns.
             name += f" [Trailing Stop {trailing_stop_pct*100:.1f}%, cooldown {trailing_stop_cooldown_days}d]"
+        if velocity_stop_pct:
+            name += (f" [Velocity Stop {velocity_stop_pct*100:.1f}%/"
+                     f"{velocity_stop_window}d {velocity_stop_mode}, "
+                     f"cooldown {velocity_stop_cooldown_days}d]")
         super().__init__(name=name)
         self.sma_window = sma_window
         self.buffer_pct = buffer_pct
@@ -447,6 +515,13 @@ class SMATrendFollowing(BaseStrategy):
         # does. cooldown_days only matters when trailing_stop_pct is set.
         self.trailing_stop_pct = trailing_stop_pct
         self.trailing_stop_cooldown_days = trailing_stop_cooldown_days
+        # Velocity (fixed-window) stop — mutually exclusive with the peak
+        # trailing stop above; exits on a velocity_stop_pct drop within a
+        # trailing velocity_stop_window-day window (see _apply_velocity_stop).
+        self.velocity_stop_pct = velocity_stop_pct
+        self.velocity_stop_window = velocity_stop_window
+        self.velocity_stop_mode = velocity_stop_mode
+        self.velocity_stop_cooldown_days = velocity_stop_cooldown_days
 
     def get_live_stats(self, monitor_ticker="QQQ", leveraged_ticker="TQQQ", data=None):
         # 1. Get the base data (pass shared pre-downloaded data if provided)
@@ -572,6 +647,8 @@ class SMATrendFollowing(BaseStrategy):
         # sequential, unlike the band/T+2/bypass logic above.
         if self.trailing_stop_pct:
             df['in_market'] = self._apply_trailing_stop(df)
+        elif self.velocity_stop_pct:
+            df['in_market'] = self._apply_velocity_stop(df)
 
         return df
 
@@ -583,19 +660,29 @@ class DualSignalAgreement(BaseStrategy):
     prior state (mirrors the existing neutral-zone hold behavior)."""
 
     def __init__(self, sma_window=200, atr_multiplier=2.5, t2_confirmation=False,
-                 trailing_stop_pct=None, trailing_stop_cooldown_days=60):
+                 trailing_stop_pct=None, trailing_stop_cooldown_days=60,
+                 velocity_stop_pct=None, velocity_stop_window=30, velocity_stop_mode="rolling_max",
+                 velocity_stop_cooldown_days=60):
         name = f"Dual-Signal Agreement (ATR x{atr_multiplier})"
         if t2_confirmation:
             name += " [T+2]"
         if trailing_stop_pct:
             name += (f" [Trailing Stop {trailing_stop_pct*100:.1f}%, "
                      f"cooldown {trailing_stop_cooldown_days}d]")
+        if velocity_stop_pct:
+            name += (f" [Velocity Stop {velocity_stop_pct*100:.1f}%/"
+                     f"{velocity_stop_window}d {velocity_stop_mode}, "
+                     f"cooldown {velocity_stop_cooldown_days}d]")
         super().__init__(name=name)
         self.sma_window = sma_window
         self.atr_multiplier = atr_multiplier
         self.t2_confirmation = t2_confirmation
         self.trailing_stop_pct = trailing_stop_pct
         self.trailing_stop_cooldown_days = trailing_stop_cooldown_days
+        self.velocity_stop_pct = velocity_stop_pct
+        self.velocity_stop_window = velocity_stop_window
+        self.velocity_stop_mode = velocity_stop_mode
+        self.velocity_stop_cooldown_days = velocity_stop_cooldown_days
 
     def _trend_state(self, ticker):
         sig_df = get_cached_signals(ticker, self.sma_window)
@@ -639,6 +726,10 @@ class DualSignalAgreement(BaseStrategy):
             df['trend_in_market'] = df['in_market'].copy()
             gspc_close = get_cached_signals("^GSPC")["Close"].reindex(df.index).ffill()
             df['in_market'] = self._apply_trailing_stop(df, price=gspc_close)
+        elif self.velocity_stop_pct:
+            df['trend_in_market'] = df['in_market'].copy()
+            gspc_close = get_cached_signals("^GSPC")["Close"].reindex(df.index).ffill()
+            df['in_market'] = self._apply_velocity_stop(df, price=gspc_close)
         return df
 
     def get_live_stats(self, monitor_ticker="QQQ", leveraged_ticker="TQQQ", data=None):
@@ -963,6 +1054,15 @@ class Backtester:
             "final_value"    : portfolio_value,
             "total_invested" : total_principal,
             "max_drawdown"   : max_drawdown * 100,
+            # Alternative drawdown metric: worst equity relative to the INITIAL
+            # fund (how far below the money originally put in the account ever
+            # fell), vs max_drawdown's running-peak-to-trough. <= 0 always; 0
+            # means the account never dipped below its starting capital.
+            # min_value is initialised to initial_fund and only ratchets down,
+            # so this is exactly min(0, lowest_equity/initial - 1). Meaningful
+            # for lump-sum runs (annual_dca=0); with DCA the initial fund is
+            # only the first contribution, so read it accordingly.
+            "max_dd_vs_initial": (min_value / self.initial_fund - 1) * 100,
             # Use actual trading days for annualisation — more accurate than
             # configured period_years when data has gaps or partial years.
             "strategy_twr"   : ((twr_index ** (252 / len(df))) - 1) * 100,
@@ -1079,6 +1179,7 @@ class RollingBacktester:
                     return None  # Missing data — skip this date
                 row_data[f"{strat.name} {metric_label} (%)"] = res[metric_key]
                 row_data[f"{strat.name} Max DD (%)"]          = res["max_drawdown"]
+                row_data[f"{strat.name} Max DD vs Initial (%)"] = res.get("max_dd_vs_initial", 0.0)
                 row_data[f"{strat.name} Total Trades"]        = res.get("total_trades", 0)
             return row_data
 
@@ -1193,6 +1294,7 @@ def summarize_rolling_results(df_res, strategies, metric_label="TWR"):
     for strat in strategies:
         ret_col = f"{strat.name} {metric_label} (%)"
         dd_col = f"{strat.name} Max DD (%)"
+        ddvi_col = f"{strat.name} Max DD vs Initial (%)"
         trades_col = f"{strat.name} Total Trades"
         if ret_col not in df_res.columns:
             continue
@@ -1205,6 +1307,10 @@ def summarize_rolling_results(df_res, strategies, metric_label="TWR"):
             # for this strategy — independent of which window had the worst
             # TWR. Matches this same file's print-summary convention above.
             "Worst DD": df_res[dd_col].min(),
+            # Worst DD vs Initial: deepest dip below the starting capital across
+            # all windows (0 if no window ever went below initial). Absent from
+            # older result frames, so default gracefully.
+            "Worst DD vs Initial": df_res[ddvi_col].min() if ddvi_col in df_res.columns else float("nan"),
             "Avg Trades": df_res[trades_col].mean(),
         })
     return rows

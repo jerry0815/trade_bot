@@ -4,6 +4,88 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2026-08-07] — Feature: Velocity Stop, QQQ 1x & Taxable Tables, DD-vs-Initial Metric
+
+Branch `feat/further-strategy-tests`. Three new research capabilities plus a
+new drawdown metric and two label fixes. All engine additions are additive —
+the existing peak-based trailing stop (`_apply_trailing_stop`) and every
+previously published number are unchanged.
+
+### New: Fixed-window ("velocity") trailing stop (`strat_backtest.py`)
+- `BaseStrategy._apply_velocity_stop`: exits on a `velocity_stop_pct` drop
+  within a trailing `velocity_stop_window` days, in two modes —
+  `rolling_max` (drop below the window's rolling high) and `point_to_point`
+  (drop vs the close `window` days ago). Lookahead-free (decides on
+  `close[i-1]` and earlier), with the same cooldown/precedence semantics as
+  the peak stop; the two stops are mutually exclusive per run. New params on
+  `SMATrendFollowing` and `DualSignalAgreement`. Unit-tested in
+  `tests/test_velocity_stop.py`.
+- New `backtest/velocity_stop_sweep.py`: 72-variant selection sweep
+  (mode × window{20,30,60} × pct{6,8,10,12}% × cooldown{20,40,60}) plus a
+  rolling evaluation of the winners. Selected `rolling_max` 6%/60d/60d and
+  `point_to_point` 6%/30d/60d.
+- New **README Table 6** + `docs/velocity-stop-2026-08-06.md`.
+- **Finding:** the velocity stop delivers equal-or-better crash protection
+  than the peak stop (rolling_max cut the dot-com event to -6.45%) but with
+  **worse rolling returns** (~18-22% Avg TWR vs the peak stop's 24.6%) and
+  **more** trades (21-30 vs 18) — it is *more* conservative, not a
+  whipsaw-reducer. On the crash-event lens it did **not** leak on slow bears
+  (dot-com/2022), contrary to the a-priori hypothesis.
+
+### New: QQQ (1x) strategy comparison — README Table 7
+- New `backtest/qqq_strategy_sweep.py` runs every Table-4 setup at 1x with
+  QQQ's 0.20% expense ratio; `docs/qqq-1x-comparison-2026-08-06.md`.
+- **Finding:** README Table 1's 1x tier already used QQQ's expense, so the
+  NDX-own[T+2] (13.89%) and Buy&Hold (11.65%) rows reproduce Table 1
+  exactly (a wiring validation); the new 1x data is the dual-signal
+  (14.69%, best) and trailing-stop rows.
+
+### New: Taxable-account comparison — README Table 8
+- New `backtest/taxable_account_comparison.py` runs the key setups through
+  the rolling suite twice (pre-tax and after-tax, engine defaults 25%
+  short / 15% long); `docs/taxable-account-2026-08-06.md`. Reports the full
+  rolling distribution (after-tax Avg / Med / Worst TWR).
+- **Finding:** after tax the peak stop's return advantage disappears
+  (dual+stop 24.59% -> 19.82% after-tax, below dual-no-stop's 23.61%);
+  tax drag is ~2x larger for the stopped setups (higher turnover realizes
+  short-term gains). The stop's value in a taxable account is drawdown
+  reduction and a higher worst-case floor, not average return.
+
+### New: "Worst DD vs Initial" drawdown metric
+- `Backtester` now exposes `max_dd_vs_initial` (lowest equity relative to
+  the starting fund); `RollingBacktester` records it per window and
+  `summarize_rolling_results` surfaces **Worst DD vs Initial**. Added as a
+  column to README **Tables 4, 6, and 8**; the Backtesting Methodology
+  section defines it vs the existing peak-to-trough **Worst DD**. Additive
+  only — existing drawdown numbers unchanged.
+- **Finding:** the gap between the two metrics separates gains-given-back
+  from principal-lost. The peak stop's -64.78% peak-to-trough is only
+  -54.75% vs initial capital; the velocity rolling_max variant posts the
+  shallowest loss-on-principal of all (-47.5%).
+
+### Table 5 (crash-event drawdown)
+- Added velocity-stop rows E/F to `backtest/crash_event_drawdown.py` and
+  README Table 5, contrasting peak vs both velocity modes across the five
+  crashes.
+
+### New: Tax-aware dual recommendation in the daily report (`bot.py`)
+- The Discord report's **RECOMMENDED ACTION** now shows two verdicts: a
+  tax-advantaged-account action (dual-signal + trailing stop, unchanged
+  config D) and a taxable-account action (the same dual-signal agreement
+  **without** the trailing stop). Motivated by the Table 8 finding that the
+  stop's extra turnover is a net-negative return trade after tax — a taxable
+  account is better off skipping it. Adds a `strategy_d_notax` instance and a
+  `strategy_d_notax` parameter to `generate_market_report`.
+
+### Fixes
+- README **Table 4 & 5 headers**: "3x TQQQ" -> "3x ^NDX (TQQQ)" (TQQQ is
+  already a 3x ETF, so "3x TQQQ" implied 9x).
+
+### Docs
+- Design spec and implementation plan under `docs/superpowers/`.
+
+---
+
 ## [2026-07-28] — Feature: Dual-Signal Agreement Strategy, Replaces Table 4
 
 ### New Feature: `DualSignalAgreement` Strategy (`strat_backtest.py`)

@@ -1,15 +1,20 @@
 """
-Quick comparison: NDX-own signal vs S&P 500 signal vs a dual-signal
-"agreement" hybrid (only flips state when both ^NDX and ^GSPC's SMA+ATR
-trend signals agree), each with T+2 confirmation off and on.
+QQQ (1x) full strategy sweep: NDX-own signal vs S&P 500 signal vs a
+dual-signal "agreement" hybrid (only flips state when both ^NDX and
+^GSPC's SMA+ATR trend signals agree), each with T+2 confirmation off
+and on, plus a Buy & Hold reference row.
 
-Fixed at ATR x2.5 (bot.py's current default) and 3x leverage — this is a
-targeted follow-up question, not a parameter sweep, so it doesn't vary ATR.
+This mirrors backtest/compare_signal_hybrid.py exactly, but models QQQ
+(1x, no daily-reset leverage decay) with QQQ's own expense ratio
+(0.20%) instead of TQQQ's 3x config (0.95%).
+
+Fixed at ATR x2.5 (bot.py's current default) — this is a targeted
+follow-up question, not a parameter sweep, so it doesn't vary ATR.
 
 Run manually:
-    python backtest/compare_signal_hybrid.py
+    python backtest/qqq_strategy_sweep.py
 
-Writes a markdown table to stdout AND backtest/signal_hybrid_output.md.
+Writes a markdown table to stdout AND backtest/qqq_strategy_sweep_output.md.
 """
 import sys
 from pathlib import Path
@@ -17,17 +22,18 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 from backtest.strat_backtest import (
-    SMATrendFollowing, DualSignalAgreement, run_experiment_suite,
+    BuyAndHold, SMATrendFollowing, DualSignalAgreement, run_experiment_suite,
     warmup_aware_start_dates, summarize_rolling_results,
 )
 
-OUTPUT_PATH = REPO_ROOT / "backtest" / "signal_hybrid_output.md"
+OUTPUT_PATH = REPO_ROOT / "backtest" / "qqq_strategy_sweep_output.md"
 
 PERIOD_YEARS = 26
-LEVERAGE_CONFIG = {"name": "3x", "leverage": 3, "expense": 0.0095}
+LEVERAGE_CONFIG = {"name": "1x", "leverage": 1, "expense": 0.0020}
 ATR = 2.5
 
 SETUPS = [
+    ("Buy & Hold", BuyAndHold(), None),
     ("NDX own signal", SMATrendFollowing(sma_window=200, atr_multiplier=ATR, t2_confirmation=False), None),
     ("NDX own signal [T+2]", SMATrendFollowing(sma_window=200, atr_multiplier=ATR, t2_confirmation=True), None),
     ("S&P 500 signal", SMATrendFollowing(sma_window=200, atr_multiplier=ATR, t2_confirmation=False), "^GSPC"),
@@ -84,16 +90,15 @@ if __name__ == "__main__":
             rows.append(row)
 
     lines = [
-        "### NDX Signal vs S&P 500 Signal vs Dual-Signal Agreement (ATR x2.5, 3x Leverage)",
+        "### QQQ (1x) — Strategy Comparison (SMA 200, ATR x2.5)",
         "",
-        "| Setup | Avg TWR | Med TWR | Worst TWR | Worst DD | Worst DD vs Init | Avg Trades | Windows |",
-        "| :--- | ---: | ---: | ---: | ---: | ---: | ---: | :--- |",
+        "| Setup | Avg TWR | Med TWR | Worst TWR | Worst DD | Avg Trades | Windows |",
+        "| :--- | ---: | ---: | ---: | ---: | ---: | :--- |",
     ]
     for r in rows:
         lines.append(
             f"| {r['Label']} | {r['Avg TWR']:.2f}% | {r['Med TWR']:.2f}% | {r['Worst TWR']:.2f}% "
-            f"| {r['Worst DD']:.2f}% | {r['Worst DD vs Initial']:.2f}% | {r['Avg Trades']:.0f} "
-            f"| {r['n_windows']} ({r['date_range']}) |"
+            f"| {r['Worst DD']:.2f}% | {r['Avg Trades']:.0f} | {r['n_windows']} ({r['date_range']}) |"
         )
     output = "\n".join(lines)
     print("\n" + output)
