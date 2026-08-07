@@ -8,7 +8,7 @@ if sys.stdout.encoding.lower() != 'utf-8':
 
 from backtest.strat_backtest import SMATrendFollowing, DualSignalAgreement, _download_with_retry, get_current_defensive_rotation
 
-def generate_market_report(strategy, strategy_d, monitor_ticker="QQQ", leveraged_ticker="TQQQ", sp500_ticker="SPY"):
+def generate_market_report(strategy, strategy_d, strategy_d_notax, monitor_ticker="QQQ", leveraged_ticker="TQQQ", sp500_ticker="SPY"):
     """
     Fetches strategy stats and formats them into your report template.
     Downloads all required tickers in a single yf.download call to avoid
@@ -31,6 +31,13 @@ def generate_market_report(strategy, strategy_d, monitor_ticker="QQQ", leveraged
     # the base price fields, which we don't use here.
     stats_d = strategy_d.get_live_stats(sp500_ticker, leveraged_ticker, data=shared_data)
     ts = stats_d["trailing_stop"]
+
+    # Taxable-account verdict: the SAME dual-signal agreement WITHOUT the
+    # trailing stop. Table 8 (docs/taxable-account-2026-08-06.md) found the
+    # stop's extra trades realize short-term gains and, after tax, it turns
+    # into a net-negative return trade (dual-signal 23.61% after-tax with the
+    # stop OFF vs 19.82% with it ON) — so a taxable account should skip it.
+    stats_d_notax = strategy_d_notax.get_live_stats(sp500_ticker, leveraged_ticker, data=shared_data)
 
     # A change is D's recommended action being new as of today (a fresh entry,
     # or an exit including a stop-triggered one). days_in_current_state == 1
@@ -102,7 +109,10 @@ def generate_market_report(strategy, strategy_d, monitor_ticker="QQQ", leveraged
         f"--------------------------\n"
         f"{format_trailing_stop(ts)}\n"
         f"--------------------------\n"
-        f"🚩 **RECOMMENDED ACTION:** {stats_d['action']}"
+        f"🚩 **RECOMMENDED ACTION**\n"
+        f"• Tax-advantaged account (IRA/401k/Roth) — dual-signal + trailing stop: **{stats_d['action']}**\n"
+        f"• Taxable account — dual-signal, no trailing stop: **{stats_d_notax['action']}**\n"
+        f"  ⓘ Taxable drops the stop: after tax its extra trades realize short-term gains and hurt returns (Table 8)."
     )
     
     return message
@@ -113,7 +123,10 @@ def run_bot():
     strat = SMATrendFollowing(sma_window=200, t2_confirmation=True)
     strat_d = DualSignalAgreement(sma_window=200, atr_multiplier=2.5, t2_confirmation=False,
                                   trailing_stop_pct=0.08, trailing_stop_cooldown_days=60)
-    message = generate_market_report(strat, strat_d)
+    # Taxable-account variant: same dual-signal agreement, no trailing stop
+    # (see the RECOMMENDED ACTION note in generate_market_report).
+    strat_d_notax = DualSignalAgreement(sma_window=200, atr_multiplier=2.5, t2_confirmation=False)
+    message = generate_market_report(strat, strat_d, strat_d_notax)
     
     # Send to Discord
     if webhook_url:

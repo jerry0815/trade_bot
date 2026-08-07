@@ -68,6 +68,15 @@ previously published number are unchanged.
   README Table 5, contrasting peak vs both velocity modes across the five
   crashes.
 
+### New: Tax-aware dual recommendation in the daily report (`bot.py`)
+- The Discord report's **RECOMMENDED ACTION** now shows two verdicts: a
+  tax-advantaged-account action (dual-signal + trailing stop, unchanged
+  config D) and a taxable-account action (the same dual-signal agreement
+  **without** the trailing stop). Motivated by the Table 8 finding that the
+  stop's extra turnover is a net-negative return trade after tax — a taxable
+  account is better off skipping it. Adds a `strategy_d_notax` instance and a
+  `strategy_d_notax` parameter to `generate_market_report`.
+
 ### Fixes
 - README **Table 4 & 5 headers**: "3x TQQQ" -> "3x ^NDX (TQQQ)" (TQQQ is
   already a 3x ETF, so "3x TQQQ" implied 9x).
