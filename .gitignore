@@ -7,6 +7,7 @@ __pycache__/
 
 backtest/readme_tables_output.md
 backtest/vt_table_output.md
+backtest/vt_reconstruction_validation_output.md
 backtest/signal_comparison_output.md
 backtest/out_of_sample_output.md
 backtest/signal_hybrid_output.md

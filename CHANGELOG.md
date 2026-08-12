@@ -33,6 +33,20 @@ bit-for-bit through the new data path).
   early flat (High==Low) bars understate the SMA-ATR buffer; price return only
   (ex-dividend), matching Tables 1–3.
 
+### New: reconstruction validation (`backtest/validate_vt_reconstruction.py`)
+- Validates the choice of MSCI World for the pre-2008 splice segment against an
+  explicit **dynamic market-cap reconstruction** — an annually re-weighted
+  blend of S&P 500 (US) + MSCI EAFE ETF (EFA, USD) — and against real VT.
+- **Findings** (`docs/vt-reconstruction-validation-2026-08-12.md`): MSCI World
+  tracks real VT at 0.94 daily-return correlation (+18pp cumulative over
+  2008–2026, from omitting emerging markets); the explicit dynamic US+EAFE
+  blend tracks real VT at 0.97; a **US-only** assumption overstates VT by
+  **+278pp**, confirming MSCI World is genuinely capturing the time-varying
+  US/international split (~30% US at Japan's 1989 peak → ~70% today), not a
+  static weight. The literal S&P 500 + MSCI EAFE blend can't reach 1985 — the
+  MSCI EAFE index has no Yahoo history and FX is unavailable before ~2003 —
+  which is why MSCI World carries the deep past.
+
 ---
 
 ## [2026-08-07] — Feature: Velocity Stop, QQQ 1x & Taxable Tables, DD-vs-Initial Metric
