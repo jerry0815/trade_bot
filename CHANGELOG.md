@@ -4,6 +4,37 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2026-08-12] — Feature: Global-Equities Table (MSCI World → VT splice)
+
+Branch `claude/table-based-on-vt-ny1xb0`. Adds a global-equity counterpart to
+the US-centric strategy-comparison tables. Purely additive — no engine changes
+and no previously published number is altered (the existing Table 2 reproduces
+bit-for-bit through the new data path).
+
+### New: README **Table 9** — Global Equities (MSCI World → VT splice)
+- Same strategy set, leverage tiers, and 26-year rolling window as Table 2,
+  applied to a global-equity base. Because the Vanguard Total World Stock ETF
+  (VT) only began trading in mid-2008, the series is **reconstructed** by
+  return-splicing the MSCI World price index (`^990100-USD-STRD`, daily back to
+  1985) onto real VT bars from 2008-07 on. The pre-2008 segment is scaled by a
+  single constant so it joins VT's price level continuously, preserving the
+  proxy's daily returns exactly.
+- New `backtest/generate_vt_table.py` builds the splice and emits the table
+  (writes `backtest/vt_table_output.md`), following the same "numbers machine-
+  generated, prose human-curated" convention as `generate_readme_tables.py`.
+- **Finding:** EMA 50/200 leads SMA 200 (ATR x2.5) on every metric at every
+  leverage tier on the global base — the same ordering Table 2 shows on the
+  S&P 500 signal, so the EMA-over-SMA read is consistent across a US and a
+  global base. Return *levels* are much lower than the US tables (global
+  developed equities trailed US large-cap tech over 1985–2026).
+- **Caveats (documented inline in the table):** for the 1985–2000 window start
+  dates most of each window is the MSCI World *proxy*, not real VT; MSCI World
+  is developed-markets only (VT also holds emerging + small caps); the proxy's
+  early flat (High==Low) bars understate the SMA-ATR buffer; price return only
+  (ex-dividend), matching Tables 1–3.
+
+---
+
 ## [2026-08-07] — Feature: Velocity Stop, QQQ 1x & Taxable Tables, DD-vs-Initial Metric
 
 Branch `feat/further-strategy-tests`. Three new research capabilities plus a
