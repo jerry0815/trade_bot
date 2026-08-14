@@ -4,6 +4,31 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2026-08-14] — Improve: EM sleeve in the Table 9 VT reconstruction
+
+Branch `claude/table-based-on-vt-ny1xb0`. Closes the largest composition gap
+between the Table 9 proxy and real VT by adding an **emerging-markets sleeve**.
+
+### Changed: Table 9 proxy is now MSCI World **+ EM** (`generate_vt_table.py`)
+- The pre-2008 proxy blends MSCI World with an EM sleeve (`EEM`) at a market-cap
+  weight that ramps 0% → ~12% (`EM_WEIGHT_BY_YEAR`); EEM's history starts 2003,
+  so the sleeve is 0 before then (EM was ~1% of world market cap in the late
+  1980s — a small omission). The blended close-to-close path drives a synthetic
+  series whose O/H/L are reconstructed from MSCI World's intraday ratios, so
+  ATR/next-open execution stay intact; one constant scales it onto real VT.
+- **Effect on Table 9:** every cell rises ~0.2–1.0pp vs the World-only version,
+  because the only EM-active proxy years (2003–2008) were an EM boom a true
+  global investor would have captured. Strategy ranking is unchanged (EMA 50/200
+  still leads at every tier); drawdowns are essentially unchanged (the worst
+  windows are driven by the pre-2003, EM-free era).
+- **Tracking vs real VT improves** (`validate_vt_reconstruction.py`,
+  `docs/vt-reconstruction-validation-2026-08-12.md`): daily corr 0.940 → 0.954,
+  monthly R² 0.973 → 0.983, CAGR gap +0.32% → −0.12%/yr, mean annual gap
+  2.1pp → 0.8pp, cumulative gap +18pp → −7pp over 2008–2026. The remaining bias
+  is the omission of global small caps (no long history available).
+
+---
+
 ## [2026-08-12] — Feature: Global-Equities Table (MSCI World → VT splice)
 
 Branch `claude/table-based-on-vt-ny1xb0`. Adds a global-equity counterpart to

@@ -46,7 +46,9 @@ OUTPUT_PATH = REPO_ROOT / "backtest" / "vt_reconstruction_validation_output.md"
 US_TICKER    = "^GSPC"             # US large cap
 EAFE_TICKER  = "EFA"              # MSCI EAFE ETF (developed ex-US, USD, 2001+)
 WORLD_TICKER = "^990100-USD-STRD"  # MSCI World price index (1985+)
+EM_TICKER    = "EEM"              # MSCI EM ETF (USD, 2003-04+)
 VT_TICKER    = "VT"               # real Vanguard Total World (2008+)
+EM_WEIGHT    = 0.12               # EM sleeve weight (Table 9's mature-era value)
 
 # Approximate US share of the US+EAFE developed blend, by year. These are the
 # "market-cap weighting adjusted year by year" the reconstruction calls for —
@@ -109,8 +111,15 @@ def main():
     us    = daily_returns(US_TICKER)
     eafe  = daily_returns(EAFE_TICKER)
     world = daily_returns(WORLD_TICKER)
+    em    = daily_returns(EM_TICKER)
     vt    = daily_returns(VT_TICKER)
     blend = build_dynamic_blend(us, eafe)
+
+    # EM-enhanced proxy = MSCI World + EM sleeve — the actual Table 9 pre-2008
+    # construction (backtest/generate_vt_table.py), evaluated here on the VT
+    # overlap at its mature-era EM weight.
+    we = pd.concat({"w": world, "e": em}, axis=1).dropna()
+    world_em = (1 - EM_WEIGHT) * we["w"] + EM_WEIGHT * we["e"]
 
     lines = ["# VT reconstruction validation", "",
              "Dynamic US(S&P 500)+EAFE(EFA) market-cap blend vs the MSCI World proxy "
@@ -121,7 +130,8 @@ def main():
              _row("Dynamic blend vs **MSCI World** (pre-VT)", _cmp(blend, world, hi="2008-06-30")),
              _row("Dynamic blend vs **MSCI World** (full)",   _cmp(blend, world)),
              _row("Dynamic blend vs **real VT**",             _cmp(blend, vt)),
-             _row("**MSCI World** vs **real VT** (proxy leg)", _cmp(world, vt)),
+             _row("**MSCI World** vs **real VT** (old proxy leg)", _cmp(world, vt)),
+             _row("**MSCI World + EM** vs **real VT** (Table 9 proxy leg)", _cmp(world_em, vt)),
              _row("US-only (S&P 500) vs **real VT** (contrast)", _cmp(us, vt)),
              ""]
 

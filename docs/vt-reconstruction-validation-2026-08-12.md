@@ -1,71 +1,85 @@
-# VT Reconstruction — Validation of the MSCI World Proxy (2026-08-12)
+# VT Reconstruction — Validation vs Real VT (2026-08-12)
 
-**Question.** README Table 9 reconstructs a pre-2008 "VT" history from the
-**MSCI World** price index (`^990100-USD-STRD`), spliced onto real VT from
-2008-07. Is a single index legitimate, or does it bake in *today's* US-heavy
-weights and misrepresent an era when Japan and Europe were far larger
-(Japan alone was ~40% of developed-market cap at its 1989 peak; the US was
-barely ~30%)?
+**Question.** README Table 9 reconstructs a pre-2008 "VT" history and splices it
+onto real VT from 2008-07. Two worries: (a) does a market-cap index bake in
+*today's* US-heavy weights and misrepresent an era when Japan/Europe were far
+larger (Japan alone was ~40% of developed-market cap at its 1989 peak; the US
+barely ~30%)? and (b) how *close* is the reconstruction to real VT where we can
+actually check?
 
-**Answer.** It is legitimate. MSCI World is **continuously market-cap
-weighted**, so it already carries that time-varying US weight — it is *not* a
-static-weight series. This note validates that empirically by building the
-explicit dynamic reconstruction the index is accused of missing and comparing
-it, plus MSCI World itself, against real VT.
+**Answers.** (a) No — MSCI World is **continuously market-cap weighted**, so it
+already carries that time-varying US weight; it is *not* a static-weight series.
+(b) The proxy Table 9 actually uses — **MSCI World + an emerging-markets sleeve**
+— tracks real VT closely over their 2008–2026 overlap: **0.95 daily-return
+correlation, monthly R² 0.98, a near-zero −0.12%/yr CAGR gap, and a 0.8pp mean
+annual gap**. Adding the EM sleeve was the single biggest improvement, cutting
+the annual gap from 2.1pp (World-only) and the CAGR gap from +0.32% to ~0.
 
 Reproduce with `python backtest/validate_vt_reconstruction.py`.
 
 ## Method
 
-Explicit dynamic reconstruction, annually re-weighted by US market-cap share:
+The Table 9 proxy blends a developed-world index with an EM sleeve at EM's
+market-cap share (0% → ~12%, `EM_WEIGHT_BY_YEAR` in `generate_vt_table.py`):
 
-    US        = S&P 500        (^GSPC)
-    ex-US dev = MSCI EAFE ETF  (EFA, USD, 2001+)
-    blend_ret(t) = w_US(year)·US_ret(t) + (1 − w_US(year))·EAFE_ret(t)
+    proxy_ret(t) = (1 − w_EM) · MSCI_World_ret(t) + w_EM · EM_ret(t)
+    MSCI World = ^990100-USD-STRD (1985+)   EM = EEM (USD, 2003-04+)
 
-`w_US` follows an editable annual schedule (≈US share of the US+EAFE developed
-blend: 0.57 in 2001 rising to ~0.74 by the mid-2020s — see
-`US_WEIGHT_BY_YEAR`). All series are daily **price** returns (ex-dividend, raw
-Close), matching Tables 1–3.
+This note also builds an independent cross-check — an explicit **dynamic
+US+EAFE** blend, annually re-weighted by US market-cap share
+(`US_WEIGHT_BY_YEAR`, ≈0.57 in 2001 → ~0.74 by the mid-2020s):
 
-Why EFA and not the MSCI EAFE index, and why only 2001+: the MSCI EAFE index
-(`^990300-USD-STRD`) has **no history on Yahoo** (live quote only), and FX pairs
-are unavailable before ~2003, so a USD ex-US series cannot be built back to
-1985 from this data source. That data wall is exactly why Table 9 uses MSCI
-World — the one developed-world series with full 1985 history — for the deep
-past, and this validation confirms that choice over the window where an
-independent cross-check *is* possible.
+    blend_ret(t) = w_US(year)·SP500_ret(t) + (1 − w_US(year))·EAFE_ret(t)
+    US = ^GSPC     ex-US dev = EFA (MSCI EAFE ETF, USD, 2001+)
+
+All series are daily **price** returns (ex-dividend, raw Close), matching
+Tables 1–3.
+
+Why EFA/EEM and not the MSCI indices, and why only 2001–2003+: the MSCI EAFE and
+EM indices have **no history on Yahoo** (live quote only), and FX pairs are
+unavailable before ~2003, so no USD ex-US series can be built back to 1985 from
+this data source. That data wall is why Table 9 uses MSCI World — the one
+developed-world series reaching 1985 — for the deep past, with the EM sleeve
+switched on only once EEM data begins (EM was ~1% of the world in the late
+1980s, so its earlier absence is a small error).
 
 ## Results
 
 | Comparison (A vs B) | Overlap (days) | Daily-ret corr | Ann. tracking err | Cumulative A vs B | Gap |
 | :--- | :--- | ---: | ---: | ---: | ---: |
 | Dynamic blend vs **MSCI World** (pre-VT) | 2001-08→2008-06 (1718) | 0.748 | 11.44% | 32% vs 29% | +3pp |
-| Dynamic blend vs **MSCI World** (full) | 2001-08→2026-08 (6268) | 0.901 | 8.40% | 407% vs 357% | +50pp |
-| Dynamic blend vs **real VT** | 2008-06→2026-08 (4559) | 0.972 | 4.82% | 275% vs 226% | +48pp |
-| **MSCI World** vs **real VT** (Table 9 proxy leg) | 2008-06→2026-08 (4552) | 0.940 | 7.34% | 254% vs 236% | +18pp |
-| US-only (S&P 500) vs **real VT** (contrast) | 2008-06→2026-08 (4559) | 0.951 | 505% vs 226% | +278pp |
+| Dynamic blend vs **MSCI World** (full) | 2001-08→2026-08 (6269) | 0.901 | 8.40% | 409% vs 359% | +50pp |
+| Dynamic blend vs **real VT** | 2008-06→2026-08 (4560) | 0.972 | 4.82% | 276% vs 228% | +49pp |
+| **MSCI World** vs **real VT** (old, World-only proxy) | 2008-06→2026-08 (4553) | 0.940 | 7.33% | 256% vs 237% | +18pp |
+| **MSCI World + EM** vs **real VT** (Table 9 proxy leg) | 2008-06→2026-08 (4553) | 0.954 | 6.36% | 231% vs 237% | **−7pp** |
+| US-only (S&P 500) vs **real VT** (contrast) | 2008-06→2026-08 (4560) | 0.951 | 6.36% | 508% vs 228% | +280pp |
 
 ### What this shows
 
-1. **The Table 9 proxy leg is sound.** MSCI World tracks real VT with 0.94
-   daily-return correlation and a +18pp cumulative gap over 18 years — modestly
-   *higher* because MSCI World is developed-only, omitting the emerging-markets
-   and small-cap sleeves VT holds (both underperformed over this window).
+1. **The EM sleeve closes most of the residual gap.** Adding emerging markets to
+   the developed-world proxy tightens the fit to real VT on every axis: the mean
+   annual return gap falls **2.1pp → 0.8pp**, the CAGR gap **+0.32% → −0.12%/yr**,
+   the cumulative gap **+18pp → −7pp**, and daily correlation rises
+   **0.940 → 0.954** (monthly R² 0.973 → 0.983). EM was the single largest
+   composition difference between VT and a developed-only proxy — the source of
+   the worst single-year miss (2009, EM +79%) — so restoring it is the highest-
+   value fidelity fix available. The proxy now sits *marginally under* VT (−7pp)
+   rather than over, because at a fixed ~12% EM weight the EM drag over 2008–2026
+   slightly outweighs the small-cap sleeve VT still holds that the proxy lacks.
 
-2. **The dynamic international leg is what matters — and MSCI World supplies
-   it.** US-only overstates real VT by **+278pp** over 18 years (505% vs 226%),
-   despite a high 0.95 daily correlation. MSCI World's gap is only **+18pp**.
-   In other words, assuming a static US-heavy weight (as skipping the
-   reconstruction would) is off by an order of magnitude on cumulative return;
-   MSCI World's market-cap weighting closes almost all of that gap. That is the
-   central point: **MSCI World is a dynamic-weight series, not a static one.**
+2. **The dynamic international weighting is what matters — and the index supplies
+   it.** US-only overstates real VT by **+280pp** over 18 years (508% vs 228%),
+   despite a high 0.95 daily correlation. The MSCI World + EM proxy's gap is
+   **−7pp**. Assuming a static US-heavy weight (as skipping the reconstruction
+   would) is off by *orders of magnitude* on cumulative return; the market-cap
+   weighting closes almost all of it. **MSCI World is a dynamic-weight series,
+   not a static one.**
 
-3. **The explicit dynamic blend corroborates the method.** The annually
-   re-weighted US+EAFE blend tracks real VT at 0.97 correlation. It runs ~+48pp
-   hot vs VT because, like MSCI World, it omits emerging markets and small caps,
-   and carries a slightly higher US tilt — a composition difference, not a
-   weighting error.
+3. **The explicit dynamic US+EAFE blend corroborates the method.** The annually
+   re-weighted blend tracks real VT at 0.97 correlation. It runs ~+49pp hot vs VT
+   because it omits emerging markets and small caps and carries a slightly higher
+   US tilt — a composition difference, not a weighting error (and exactly why the
+   EM sleeve, not a reweighting, is the fix that matters).
 
 ### Caveats (read these before trusting the tracking-error column)
 
@@ -80,9 +94,14 @@ independent cross-check *is* possible.
   their correlations are much higher (0.94–0.97).
 - **Price return only** (ex-dividend), so every "cumulative" figure understates
   total return; this is consistent across all series and matches Tables 1–3.
-- The `US_WEIGHT_BY_YEAR` schedule is an approximate market-cap path, not a
-  vendor weight file. The tracking checks are robust to modest weight error
-  because US and EAFE returns are highly correlated intraday.
+- The `US_WEIGHT_BY_YEAR` and `EM_WEIGHT_BY_YEAR` schedules are approximate
+  market-cap paths, not vendor weight files. The tracking checks are robust to
+  modest weight error because the component returns are highly correlated.
+- **The EM sleeve only helps from 2003** (EEM's inception); before then it is 0.
+  This is why the Table 9 EM enhancement moves only the 2003–2008 portion of the
+  pre-splice proxy, lifting the table's cells by ~0.2–1.0pp (those years were an
+  EM boom). EM's absence before 2003 is a small error because EM was a tiny
+  share of world market cap then.
 
 ## Data-recovered US weight (secondary corroboration)
 
@@ -96,10 +115,12 @@ rather than behaving like a US-only index. Full yearly table in
 
 ## Bottom line
 
-Using MSCI World for Table 9's pre-2008 segment is the right call given the
-data available: it is a genuinely dynamic, market-cap-weighted developed-world
-series that tracks real VT closely (0.94 corr, +18pp/18yr), and it captures the
-time-varying US/international split that a static or US-only assumption would
-get wrong by hundreds of percentage points. Its one systematic bias — omitting
-emerging markets and small caps — makes it run modestly *hot* versus true VT,
-which is disclosed in the Table 9 caveats.
+The Table 9 reconstruction — **MSCI World + an EM sleeve**, spliced onto real VT
+— tracks real VT closely over the window where a check is possible: **0.95
+daily correlation, monthly R² 0.98, −0.12%/yr CAGR gap, 0.8pp mean annual gap,
+−7pp cumulative over 18 years**. Adding emerging markets was the single biggest
+fidelity gain (annual gap 2.1pp → 0.8pp). The market-cap weighting captures the
+time-varying US/international split that a static or US-only assumption would get
+wrong by *hundreds* of percentage points (+280pp). The one bias that remains —
+no global **small caps** (no long history available) — is small and disclosed in
+the Table 9 caveats.
