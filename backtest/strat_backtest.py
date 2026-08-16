@@ -4,6 +4,11 @@ import pandas as pd
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor
 
+# Risk-adjusted ratio helpers live in a dedicated module (numpy-only, no
+# back-reference to this file) so the definitions have a single source of
+# truth shared by the per-window engine here and the standalone analyses.
+from backtest.risk_metrics import sharpe_ratio, sortino_ratio, calmar_ratio
+
 # ---------------------------------------------------------------------------
 # Capital Gains Tax Rates (US defaults)
 # Long-term: position held > 365 calendar days
@@ -699,16 +704,29 @@ class Backtester:
             drawdown = (portfolio_value - peak_value) / peak_value
             if drawdown < max_drawdown: max_drawdown = drawdown
 
+        strategy_twr = ((twr_index ** (252 / len(df))) - 1) * 100
+        max_drawdown_pct = max_drawdown * 100
+
+        # Risk-adjusted ratios from the same daily-return series used above.
+        # The per-day risk-free rate is this simulator's own cash yield
+        # (cash_ret = BR*0.8/252), so excess return means "beyond idle cash in
+        # this era" — on cash days daily_ret_arr == cash_ret, giving exactly
+        # zero excess, as intended. Computed from the pre-tax return array;
+        # when apply_tax=True these ratios remain pre-tax (the published
+        # tables are pre-tax, so this is consistent with them).
         result = {
             "final_value"    : portfolio_value,
             "total_invested" : total_principal,
-            "max_drawdown"   : max_drawdown * 100,
+            "max_drawdown"   : max_drawdown_pct,
             # Use actual trading days for annualisation — more accurate than
             # configured period_years when data has gaps or partial years.
-            "strategy_twr"   : ((twr_index ** (252 / len(df))) - 1) * 100,
+            "strategy_twr"   : strategy_twr,
             "total_roi"      : ((portfolio_value - total_principal) / total_principal) * 100,
             "min_value"      : min_value,
             "trade_log"      : trade_log,
+            "sharpe"         : sharpe_ratio(daily_ret_arr, cash_ret),
+            "sortino"        : sortino_ratio(daily_ret_arr, cash_ret),
+            "calmar"         : calmar_ratio(strategy_twr, max_drawdown_pct),
         }
         if self.apply_tax:
             result["total_tax_paid"] = total_tax_paid
@@ -737,6 +755,10 @@ class Backtester:
         print(f"Total Trades:   {res.get('total_trades', 0)}")
         print(f"Avg Cash Hold:  {res.get('avg_cash_hold', 0):.1f} Trading Days | Total Cash Periods: {res.get('total_cash_periods', 0)}")
 
+        # Risk-adjusted ratios (excess return over the simulator's cash yield)
+        if "sharpe" in res:
+            print(f"Sharpe:         {res['sharpe']:.2f} | Sortino: {res['sortino']:.2f} | Calmar: {res['calmar']:.2f}")
+
         # --- Per-trade log ---
         trade_log = res.get("trade_log", [])
         if trade_log:
@@ -752,7 +774,7 @@ class Backtester:
         # Print any remaining custom stats returned by the strategy
         skip_keys = {"strategy", "final_value", "total_invested", "max_drawdown", "strategy_twr",
                      "total_roi", "min_value", "total_trades", "avg_cash_hold", "total_cash_periods",
-                     "total_tax_paid", "trade_log"}
+                     "total_tax_paid", "trade_log", "sharpe", "sortino", "calmar"}
         for key, value in res.items():
             if key in skip_keys:
                 continue
@@ -817,6 +839,9 @@ class RollingBacktester:
                 row_data[f"{strat.name} {metric_label} (%)"] = res[metric_key]
                 row_data[f"{strat.name} Max DD (%)"]          = res["max_drawdown"]
                 row_data[f"{strat.name} Total Trades"]        = res.get("total_trades", 0)
+                row_data[f"{strat.name} Sharpe"]              = res.get("sharpe")
+                row_data[f"{strat.name} Sortino"]             = res.get("sortino")
+                row_data[f"{strat.name} Calmar"]              = res.get("calmar")
             return row_data
 
         workers = min(8, len(self.start_dates))
