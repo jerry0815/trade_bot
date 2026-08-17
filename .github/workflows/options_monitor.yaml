@@ -1,0 +1,33 @@
+name: Options Overlay Monitor
+
+# Daily scan of the dynamic two-sided options overlay: today's regime
+# (price trend x IV-Rank), the target equity allocation, and the option
+# structure the matrix calls for. Posts to Discord via the DISCORD_WEBHOOK
+# secret (the same one bot.py uses). Set that secret in the repo settings;
+# if it is empty the report is just printed to the Actions log.
+
+on:
+  schedule:
+    # 00:45 UTC on weekdays — offset from daily_check.yaml (00:30) so the two
+    # jobs don't hit Yahoo Finance at the same moment.
+    - cron: '45 0 * * 1-5'
+  workflow_dispatch:
+
+jobs:
+  run-options-monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run options monitor
+        run: python -m options.live_monitor
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
