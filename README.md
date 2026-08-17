@@ -48,6 +48,22 @@ The **recommended action** is "in the market" only when both indices agree bulli
 
 ---
 
+### Experimental — Dynamic Two-Sided Options Overlay
+
+A separate, self-contained [`options/`](options/) package layers a
+**regime-adaptive options engine** on top of the trend model. A two-tier state
+machine (price trend × 252-day IV-Rank) sets both the equity allocation
+(100% TQQQ / 50-50 / 100% SGOV) and the option structure to overlay — cheap
+put-debit tail hedges at low IV, covered calls / bull-put spreads / cash-secured
+puts to harvest premium at high IV — under hard Greek guardrails (0.10–0.15Δ
+shorts, a 21-DTE gamma cutoff, 50% profit-takes, and zero-naked-call /
+100%-cash-secured collateral rules). It ships its own event-driven backtester and
+a 4-model benchmark suite. See [`options/README.md`](options/README.md) for the
+full matrix, accounting assumptions, and how to run it. This overlay is
+research/experimental and independent of the production `bot.py` recommendation.
+
+---
+
 ### Backtesting Methodology
 
 All results below are produced by rolling 26-year backtests stepped forward **monthly** from the earliest available data through the latest valid start date (2000-07). This eliminates timing luck and exposes strategies to every major market regime — the Dot-com crash, 2008 Financial Crisis, COVID crash, and the 2022 rate-shock bear market.

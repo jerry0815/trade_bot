@@ -4,6 +4,45 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2026-08-17] — Feat: dynamic two-sided options overlay
+
+Branch `claude/dynamic-options-overlay-tqqq-hlsp5c`. Adds a regime-adaptive,
+Greek-governed options engine on top of the SMA+ATR trend system, as a new
+self-contained `options/` package (see `options/README.md`).
+
+### Added: `options/` package
+- **`greeks.py`** — Black-Scholes pricing and a skew-adjusted delta→strike solver
+  (+20% put / −5% call empirical vertical skew).
+- **`iv_loader.py`** — ^VXN ingestion → rolling 252-day IV-Rank; the math core
+  (`compute_iv_rank`) is pure and offline-testable.
+- **`regime.py`** — two-tier state machine (price trend × IV-Rank) mapping each
+  day to an equity allocation (100% TQQQ / 50-50 / 100% SGOV) and an option
+  structure (put-debit hedge, covered call, bull-put spread, or cash-secured put).
+- **`position_sizer.py`** — integer-contract sizing plus the collateral
+  guardrails (zero naked calls; 100% cash-secured puts).
+- **`overlay_backtest.py`** — event-driven simulator with per-leg mark-to-market,
+  50%-profit / 21-DTE / stop-loss exits, and the bear-signal covered-call
+  buy-to-close-before-liquidation linkage. Runs the four benchmark models.
+- **`run_benchmark.py`** — CLI producing the 4-model KPI comparison table.
+- **`live_monitor.py`** — daily scanner: today's regime + target strikes, with an
+  optional Discord webhook (mirrors `bot.py`).
+- **`_net.py`** — proxy-aware, retrying yfinance download helper (handles sandbox
+  MITM proxies that reject curl_cffi's browser-TLS impersonation).
+
+### Deviation from the handoff plan
+- Implemented on the repo's existing vectorized engine conventions instead of
+  introducing Backtrader — the overlay reuses the indicator model and adds an
+  event loop only for option state, avoiding a duplicate parallel system.
+
+### Notes
+- Adds `numpy` and `scipy` to `requirements.txt` (Black-Scholes).
+- Options are cash-settled at intrinsic on expiry; fills/bid-ask/assignment are
+  not modelled — results are strategy-comparison signal, not tradeable P&L.
+- Unit tests: `tests/test_greeks.py`, `test_regime.py`, `test_position_sizer.py`,
+  `test_iv_loader.py`, `test_overlay_backtest.py`.
+
+---
+
 ## [2026-08-14] — Improve: EM sleeve in the Table 9 VT reconstruction
 
 Branch `claude/table-based-on-vt-ny1xb0`. Closes the largest composition gap
