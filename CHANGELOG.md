@@ -4,6 +4,37 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2026-08-18] — Docs: README split into per-strategy docs
+
+Documentation-only restructure. No code, backtest scripts, or numbers changed —
+every result table and narrative block was relocated verbatim.
+
+### Changed
+- **README.md** slimmed from ~354 lines / 9 embedded tables to a lean overview:
+  condensed 3-layer *How It Works* (each layer links to its strategy doc), the
+  experimental options-overlay blurb retained as a short section, condensed
+  *Backtesting Methodology*, a new **Final Decision** table (the bot's
+  recommended config vs Buy & Hold), and a one-line-result index linking to the
+  strategy docs. The Changelog/Theory/Architecture/Getting-Started/Disclaimer
+  sections are unchanged.
+
+### New: `docs/strategies/` per-feature docs
+- `methodology.md` — backtest engine + drawdown-metric definitions.
+- `core-trend-signal.md` — SMA 200 + ATR (Layer 1) + Tables 1–3.
+- `dual-signal-agreement.md` — noise filter (Layer 2) + Table 4.
+- `trailing-stop.md` — crash protection (Layer 3) + Table 5.
+- `velocity-stop.md` — Table 6.
+- `qqq-1x.md` — Table 7.
+- `tax-treatment.md` — Table 8.
+- `global-equities.md` — Table 9 (MSCI World + EM → VT splice).
+- Each doc holds its feature's mechanics + full table(s) + narrative and links
+  down to the existing dated finding docs, which are untouched. Every table now
+  lives in exactly one strategy doc. The experimental options overlay keeps
+  `options/README.md` as its doc (linked from the README, no new wrapper).
+- Design spec: `docs/superpowers/specs/2026-08-18-readme-strategy-docs-split-design.md`.
+
+---
+
 ## [2026-08-17] — Feat: collar live monitor (the execution hook)
 
 Branch `claude/dynamic-options-overlay-tqqq-hlsp5c`. Points the daily monitor at
