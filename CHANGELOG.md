@@ -4,6 +4,32 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2026-08-17] — Add: taxable-account model for the covered-call overlay
+
+Branch `claude/dynamic-options-overlay-tqqq-hlsp5c`. Promotes covered calls
+(Model 3, 0.20Δ — a delta sweep confirmed 0.20 is already the Calmar-optimal
+strike at 2.5× vol) and stress-tests it in a taxable account.
+
+### Added: two-bucket taxable simulation (`overlay_backtest.py`)
+- `OverlayConfig.taxable` / `tax_rate` switch the engine to an equity+cash book
+  with real cost-basis tracking. It trades only on regime changes (not the daily
+  reweight), realizes gains on equity sales and option closes, and taxes net
+  short-term gains once a year with loss carry-forward. New `Taxes Paid ($)` KPI.
+  Tests: `test_taxable_zero_rate_matches_pretax_and_pays_no_tax`,
+  `test_taxable_positive_rate_drags_return_and_collects_tax`,
+  `test_taxable_buy_hold_defers_all_gains`. 54 tests green.
+- **Finding:** short-term taxes dominate — at 35% both Trend and Covered Calls
+  lose ~65% of terminal wealth (Trend $2.95M→$945k, CC $2.61M→$853k). Covered
+  Calls keeps its risk-adjusted edge after tax (Calmar 2.20 vs Trend 2.04 @35%;
+  holds at 24/37% too) and pays slightly less tax (its net option loss shields
+  gains), but ends with ~10% less after-tax wealth — the same smoother-ride-for-
+  less-money trade, now with a real dollar cost. The edge is cleanest in a
+  tax-advantaged account.
+- Caveat: single blended short-term rate; qualified-covered-call / straddle /
+  wash-sale rules and state specifics are not modeled. Not tax advice.
+
+---
+
 ## [2026-08-17] — Fix: price TQQQ options at realistic vol; covered calls beat trend
 
 Branch `claude/dynamic-options-overlay-tqqq-hlsp5c`. Continues the optimization

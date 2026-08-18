@@ -130,6 +130,16 @@ class OverlayConfig:
     hedge_premium_fraction: float = 0.01  # per-roll budget as fraction of NAV
     hedge_take_gain: float = 3.0          # let a working hedge run to +200% before taking
 
+    # -- taxable-account model -------------------------------------------- #
+    # When taxable=True the simulator switches to a two-bucket (equity + cash)
+    # book with real cost-basis tracking: it trades only on regime changes
+    # (not the daily reweight), realizes gains when it sells equity or closes an
+    # option, and taxes net realized short-term gains once a year at tax_rate,
+    # carrying losses forward. tax_rate=0 gives the pre-tax version of the same
+    # regime-traded framework (to isolate the tax drag).
+    taxable: bool = False
+    tax_rate: float = 0.35   # blended short-term (federal + state); options + fast rotations are ST
+
 
 @dataclass
 class BacktestResult:
@@ -364,6 +374,8 @@ class OptionsOverlayBacktester:
     # -- main loop --------------------------------------------------------- #
     def run(self, data: pd.DataFrame) -> BacktestResult:
         cfg = self.cfg
+        if cfg.taxable:
+            return self._run_taxable(data)
         df = data.dropna(subset=["Close"]).copy()
         n = len(df)
 
@@ -491,9 +503,174 @@ class OptionsOverlayBacktester:
         )
         return BacktestResult(cfg.model, equity_curve, kpis, closed)
 
+    # -- taxable two-bucket loop ------------------------------------------- #
+    def _run_taxable(self, data: pd.DataFrame) -> BacktestResult:
+        """Two-bucket (equity + cash) book with cost-basis tracking. Trades only
+        on regime changes; realizes gains on equity sales and option closes; taxes
+        net short-term gains once a year, carrying losses forward. Everything is
+        short-term (fast rotations + <1y options) so a single rate is used."""
+        cfg = self.cfg
+        df = data.dropna(subset=["Close"]).copy()
+        n = len(df)
+        close = df["Close"].values.astype(float)
+        sma = df["SMA"].values.astype(float)
+        atr = df["ATR"].values.astype(float)
+        rsi = df["RSI"].values.astype(float)
+        iv = df["IV"].values.astype(float)
+        ivr = df["IV_Rank"].values.astype(float)
+        dates = df.index
+        ret = np.empty(n)
+        ret[0] = 0.0
+        ret[1:] = close[1:] / close[:-1] - 1.0
+        cash_daily = cfg.cash_yield / TRADING_DAYS
+        rate = cfg.tax_rate
+
+        equity_mv = 0.0
+        cash_mv = cfg.initial_capital
+        equity_basis = 0.0
+        loss_carry = 0.0
+        realized_ytd = 0.0
+        taxes_paid = 0.0
+        open_positions: list[OptionPosition] = []
+        closed: list = []
+        premium_collected = 0.0
+        debit_paid = 0.0
+        realized_opt = 0.0
+        nav_curve = np.empty(n)
+
+        options_on = cfg.model in ("static_cc", "dynamic", "hedge_only")
+        force_full_equity = cfg.model == "buy_hold"
+        prev_w = None
+
+        def settle_year():
+            nonlocal realized_ytd, loss_carry, cash_mv, taxes_paid
+            taxable = realized_ytd
+            if taxable > 0 and loss_carry > 0:
+                off = min(taxable, loss_carry)
+                taxable -= off
+                loss_carry -= off
+            if taxable < 0:
+                loss_carry += -taxable
+                taxable = 0.0
+            t = taxable * rate
+            cash_mv -= t
+            taxes_paid += t
+            realized_ytd = 0.0
+
+        for i in range(n):
+            S = close[i]
+            sigma_base = iv[i] / 100.0 if iv[i] == iv[i] and iv[i] > 1.5 else (
+                iv[i] if iv[i] == iv[i] else 0.0
+            )
+            sigma_base *= cfg.pricing_iv_mult
+
+            if force_full_equity:
+                w_eq = 1.0
+                regime_state = None
+            else:
+                regime_state = classify_regime(S, sma[i], atr[i], ivr[i], rsi[i], cfg.regime)
+                w_eq = regime_state.target_equity_pct
+            regime = regime_state.regime if regime_state else MarketRegime.BULL_EXPANSION
+
+            # Rebalance only when the target weight actually changes (or day 0).
+            if prev_w is None or w_eq != prev_w:
+                total = equity_mv + cash_mv
+                target = w_eq * total
+                if target < equity_mv - 1e-9 and equity_mv > 0:      # sell equity
+                    sell = equity_mv - target
+                    frac = sell / equity_mv
+                    realized_ytd += sell - equity_basis * frac
+                    equity_basis *= (1.0 - frac)
+                    equity_mv = target
+                    cash_mv += sell
+                elif target > equity_mv + 1e-9:                      # buy equity
+                    buy = min(target - equity_mv, cash_mv)
+                    equity_mv += buy
+                    equity_basis += buy
+                    cash_mv -= buy
+                prev_w = w_eq
+
+            # Grow the two buckets; SGOV interest is ordinary income.
+            interest = cash_mv * cash_daily
+            equity_mv *= (1.0 + ret[i])
+            cash_mv += interest
+            realized_ytd += interest
+
+            # Age / reprice / close options; realized option P&L is cash + taxable.
+            still_open: list[OptionPosition] = []
+            for pos in open_positions:
+                if i > 0:
+                    pos.dte_remaining -= (dates[i] - dates[i - 1]).days
+                self._reprice(pos, S, sigma_base if sigma_base > 0 else 0.01)
+                reason = (self._should_close_hedge(pos, regime) if cfg.model == "hedge_only"
+                          else self._should_close(pos, regime, ivr[i]))
+                if reason is not None:
+                    pnl = pos.pnl()
+                    realized_opt += pnl
+                    cash_mv += pnl
+                    realized_ytd += pnl
+                    closed.append({
+                        "label": pos.label, "action": pos.action.value,
+                        "entry_date": pos.entry_date, "exit_date": dates[i],
+                        "contracts": pos.contracts, "pnl": pnl, "reason": reason,
+                    })
+                else:
+                    still_open.append(pos)
+            open_positions = still_open
+
+            # Open new positions per the model (sizing off the whole book).
+            if options_on and sigma_base > 0 and not force_full_equity:
+                nav = equity_mv + cash_mv
+                if cfg.model == "static_cc":
+                    if regime == MarketRegime.BULL_EXPANSION and not any(
+                        p.action == OptionAction.SELL_COVERED_CALL for p in open_positions
+                    ):
+                        pos = self._static_cc_position(S, sigma_base, nav, w_eq, dates[i])
+                        if pos is not None:
+                            open_positions.append(pos)
+                            premium_collected += -pos.value_entry * 100 * pos.contracts
+                elif cfg.model == "hedge_only":
+                    if self._hedge_eligible(regime, ivr[i]) and not open_positions:
+                        pos = self._open_position(
+                            OptionAction.BUY_PUT_DEBIT_SPREAD, S, sigma_base, nav, w_eq,
+                            dates[i], premium_fraction=cfg.hedge_premium_fraction)
+                        if pos is not None:
+                            open_positions.append(pos)
+                            debit_paid += pos.value_entry * 100 * pos.contracts
+                else:  # dynamic
+                    action = regime_state.option_action
+                    if action != OptionAction.IDLE and not any(
+                        p.action == action for p in open_positions
+                    ):
+                        pos = self._open_position(action, S, sigma_base, nav, w_eq, dates[i])
+                        if pos is not None:
+                            open_positions.append(pos)
+                            if pos.is_credit:
+                                premium_collected += -pos.value_entry * 100 * pos.contracts
+                            else:
+                                debit_paid += pos.value_entry * 100 * pos.contracts
+
+            if i > 0 and dates[i].year != dates[i - 1].year:
+                settle_year()
+
+            unrealized = sum(p.pnl() for p in open_positions)
+            nav_curve[i] = equity_mv + cash_mv + unrealized
+
+        settle_year()  # final partial year
+        nav_curve[-1] = equity_mv + cash_mv + sum(p.pnl() for p in open_positions)
+        total_option_pnl = realized_opt + sum(p.pnl() for p in open_positions)
+
+        equity_curve = pd.Series(nav_curve, index=dates)
+        kpis = self._compute_kpis(
+            equity_curve, closed, premium_collected, debit_paid, total_option_pnl,
+            taxes_paid=taxes_paid,
+        )
+        return BacktestResult(cfg.model, equity_curve, kpis, closed)
+
     # -- metrics ----------------------------------------------------------- #
     def _compute_kpis(
-        self, curve: pd.Series, closed, premium_collected, debit_paid, total_option_pnl
+        self, curve: pd.Series, closed, premium_collected, debit_paid, total_option_pnl,
+        taxes_paid=None,
     ) -> dict:
         cfg = self.cfg
         vals = curve.values.astype(float)
@@ -523,7 +700,7 @@ class OptionsOverlayBacktester:
         wins = [c for c in closed if c["pnl"] > 0]
         win_rate = (len(wins) / len(closed) * 100.0) if closed else float("nan")
 
-        return {
+        out = {
             "Initial Capital ($)": initial,
             "Ending Portfolio Value ($)": ending,
             "CAGR (%)": cagr * 100 if cagr == cagr else float("nan"),
@@ -538,6 +715,9 @@ class OptionsOverlayBacktester:
             "Option Win Rate (%)": win_rate,
             "Total Option Trades": len(closed),
         }
+        if taxes_paid is not None:
+            out["Taxes Paid ($)"] = taxes_paid
+        return out
 
     @staticmethod
     def _max_drawdown_duration(curve: pd.Series, running_peak: np.ndarray) -> int:

@@ -136,6 +136,34 @@ def test_hedge_only_max_ivr_gate_blocks_opens():
     assert res.kpis["Total Option Trades"] == 0
 
 
+def test_taxable_zero_rate_matches_pretax_and_pays_no_tax():
+    # The two-bucket taxable framework at rate=0 must reproduce the trend model
+    # closely (it only differs by trading on regime changes vs the daily reweight)
+    # and must report zero taxes.
+    data = _synthetic_data(n=1200, seed=2)
+    base = run_model(data, "trend")
+    tax0 = run_model(data, "trend", taxable=True, tax_rate=0.0)
+    assert tax0.kpis["Taxes Paid ($)"] == 0.0
+    rel = abs(tax0.kpis["Ending Portfolio Value ($)"] - base.kpis["Ending Portfolio Value ($)"]) \
+        / base.kpis["Ending Portfolio Value ($)"]
+    assert rel < 0.05
+
+
+def test_taxable_positive_rate_drags_return_and_collects_tax():
+    data = _synthetic_data(n=1200, seed=2)
+    free = run_model(data, "static_cc", taxable=True, tax_rate=0.0)
+    taxed = run_model(data, "static_cc", taxable=True, tax_rate=0.35)
+    assert taxed.kpis["Taxes Paid ($)"] > 0
+    assert taxed.kpis["Ending Portfolio Value ($)"] < free.kpis["Ending Portfolio Value ($)"]
+
+
+def test_taxable_buy_hold_defers_all_gains():
+    # Buy & hold never sells and holds no options -> gains stay unrealized -> ~no tax.
+    data = _synthetic_data(n=1200, seed=2)
+    res = run_model(data, "buy_hold", taxable=True, tax_rate=0.37)
+    assert res.kpis["Taxes Paid ($)"] == 0.0
+
+
 def test_credit_profit_target_closes_position():
     # Drive a covered call to a decayed state and confirm the profit-target path.
     cfg = OverlayConfig(model="dynamic")
