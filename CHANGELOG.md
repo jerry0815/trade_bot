@@ -4,6 +4,36 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2026-08-17] — Add: reconstructed-TQQQ backtest to 2001 (dot-com + 2008)
+
+Branch `claude/dynamic-options-overlay-tqqq-hlsp5c`. Real TQQQ starts 2010, so the
+primary benchmark never saw a prolonged bear. Extend the test through the dot-com
+crash and 2008 on a reconstructed series.
+
+### Added: `options/reconstruct_tqqq.py`
+- Rebuilds synthetic TQQQ from `^NDX` (history to 1985): `3 × r_NDX − (0.95%
+  expense + 2 × short_rate)/252 + α`, with `α` (1.26%/yr) calibrated to real TQQQ
+  over 2010–2026. Validated at **~0.999** daily-return correlation. Pricing vol
+  uses `^VXN` (from 2001), `^VIX × 1.15` before. `prepare_extended_data()` returns
+  the strategy-ready frame. Offline tests for the reconstruction math (59 green).
+- Report: `docs/options-overlay-extended-2001.md`.
+
+### Findings (2001–2026)
+- **Trend-following is what makes leveraged Nasdaq survivable:** Buy & Hold 3× TQQQ
+  draws down **−98.6%** (dot-com −96.9%, 2008 −95.0%); the SMA200 cash-rotation
+  cuts that to −33%. Options are a second-order refinement.
+- **The collar's edge holds across four bears and is largest in the worst ones**
+  (2008 drawdown −12% vs Trend −25%). Ranking preserved: Collar > CC > Trend > B&H.
+- **A fast crash hurts a trend-follower more than a slow bear:** every trend-based
+  model's *overall* MaxDD is the 2020 COVID crash (fast, un-trackable by a 200-day
+  average), not dot-com/2008 (slow, rotated out early) — which is why the overall
+  MaxDD matches the 2018–2026 benchmark. The new data is exercised by the crash-
+  window columns, not the headline MaxDD.
+- Caveat: pre-2010 TQQQ is reconstructed (not real); ignore absolute ending
+  dollars (frictionless 25-yr compounding); single path.
+
+---
+
 ## [2026-08-17] — Feat: collar model beats the covered call (self-financing hedge)
 
 Branch `claude/dynamic-options-overlay-tqqq-hlsp5c`. Searched past the pure
