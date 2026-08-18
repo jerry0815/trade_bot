@@ -23,9 +23,9 @@ flowchart LR
 
 The **recommended action** is "in the market" only when both indices agree bullish **and** the trailing stop has not fired. The daily report prints this action twice — once for a **tax-advantaged account** (with the trailing stop) and once for a **taxable account** (dual-signal only, *without* the stop), because the stop's extra turnover is a net-negative return trade after tax (see [Tax Treatment](docs/strategies/tax-treatment.md)).
 
-### Experimental — Dynamic Two-Sided Options Overlay
+### Experimental — Options Overlay (Collar)
 
-A separate, self-contained [`options/`](options/) package layers a **regime-adaptive options engine** on top of the trend model. A two-tier state machine (price trend × 252-day IV-Rank) sets both the equity allocation (100% TQQQ / 50-50 / 100% SGOV) and the option structure to overlay — cheap put-debit tail hedges at low IV, covered calls / bull-put spreads / cash-secured puts to harvest premium at high IV — under hard Greek guardrails (0.10–0.15Δ shorts, a 21-DTE gamma cutoff, 50% profit-takes, and zero-naked-call / 100%-cash-secured collateral rules). It ships its own event-driven backtester and a 4-model benchmark suite. See [`options/README.md`](options/README.md) for the full matrix, accounting assumptions, and how to run it. This overlay is research/experimental and independent of the production `bot.py` recommendation.
+A separate, self-contained [`options/`](options/) package tests which option structure best complements the trend model on leveraged (3× TQQQ) exposure. After fixing the pricing model and comparing five structures across the vol assumption and every crash since 2001, the winner is a **collar** — sell a ~20Δ call and buy a ~15Δ put on the TQQQ held, monthly, in the bull/transition regimes. It beats plain Trend on a risk-adjusted basis (Calmar ~4.2 vs 2.82) by cutting drawdown, and the edge is structural rather than fitted. The two-sided premium-selling engine was *rejected* (its short puts add tail risk). Research/experimental, independent of the production `bot.py` recommendation. See [Options Overlay](docs/strategies/options-overlay.md) for the results and [`options/README.md`](options/README.md) for the engine.
 
 ---
 
@@ -62,7 +62,7 @@ Each strategy/feature has its own doc with the mechanics, its full result tables
 | **QQQ (1x)** | Unleveraged cross-check: dual-signal agreement again best at 14.69% Avg TWR / 9 trades; validates Table 1's 1x tier. | [qqq-1x](docs/strategies/qqq-1x.md) |
 | **Tax treatment** | After tax, the stop's return edge inverts for the dual pair (23.61% no-stop vs 19.82% with stop) — hence no stop in taxable accounts. | [tax-treatment](docs/strategies/tax-treatment.md) |
 | **Global equities** (MSCI World+EM → VT) | Strategy ranking holds on a global base — EMA 50/200 leads at every tier — at lower return levels than US tech (reconstruction cross-check). | [global-equities](docs/strategies/global-equities.md) |
-| **Options overlay** (experimental) | Regime-adaptive two-sided options engine layered on the trend model; research-only, independent of `bot.py`. | [options/README.md](options/README.md) |
+| **Options overlay** (experimental) | A collar (sell ~20Δ call + buy ~15Δ put) on the trend model beats plain Trend on risk-adjusted return (Calmar ~4.2 vs 2.82) by cutting drawdown; vol-robust, tested to 2001. | [options-overlay](docs/strategies/options-overlay.md) |
 
 ---
 

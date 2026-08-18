@@ -4,6 +4,20 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2026-08-18] — Docs: options-overlay strategy doc (collar results)
+
+Adds `docs/strategies/options-overlay.md` in the per-strategy house style,
+presenting the options-overlay backtest results: the 2018–2026 benchmark
+(Table 10) and the reconstructed-TQQQ stress test to 2001 (Table 11, dot-com +
+2008). Conclusion: a **collar** (sell ~20Δ call + buy ~15Δ put on the TQQQ held)
+beats plain Trend on risk-adjusted return (Calmar ~4.2 vs 2.82) by cutting
+drawdown, vol-robust; the two-sided premium-selling engine was rejected.
+Updates the README options blurb and the strategy index (both described the old
+two-sided matrix) to point at the new doc. Documentation only; links to the
+existing dated finding docs, no numbers changed.
+
+---
+
 ## [2026-08-18] — Docs: README split into per-strategy docs
 
 Documentation-only restructure. No code, backtest scripts, or numbers changed —
