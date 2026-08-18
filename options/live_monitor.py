@@ -93,7 +93,7 @@ def _live_chain_lines(S: float, r: float = 0.045) -> list[str]:  # pragma: no co
         expiries = tk.options
         if not expiries:
             return []
-        today = pd.Timestamp.utcnow().normalize().tz_localize(None)
+        today = pd.Timestamp.now("UTC").normalize().tz_localize(None)
         target = today + pd.Timedelta(days=COLLAR_DTE)
         expiry = min(expiries, key=lambda e: abs((pd.Timestamp(e) - target).days))
         dte = (pd.Timestamp(expiry) - today).days
