@@ -65,14 +65,17 @@ option trade count.
 
 ## Accounting assumptions
 
-* NAV = `equity_value + realized_option_pnl + unrealized_option_pnl`. Opening a
-  position is NAV-neutral; short decay and assignment risk both show up as P&L.
+* NAV = `sleeve_value + unrealized_option_pnl`. Opening a position is
+  NAV-neutral; short decay and assignment risk both show up as P&L.
 * TQQQ's **actual** (already-3x) daily returns drive the equity sleeve; the SGOV
   sleeve earns a flat `cash_yield` (default 4.5%).
 * Options are **cash-settled at intrinsic on expiry** — captures capped upside
   (covered calls) and tail losses (short puts) without modelling share
   assignment.
-* Option P&L is not reinvested into the equity sleeve (mildly conservative).
+* Realized option P&L is **settled into the compounding book** on close, so a
+  covered-call loss reduces the capital that keeps compounding — exactly as in a
+  real account. This keeps returns and drawdowns self-consistent even when
+  cumulative option P&L is large relative to the book.
 * Vol input is ^VXN as a TQQQ IV proxy; the vertical skew is an empirical
   multiplicative offset, not a fitted surface.
 

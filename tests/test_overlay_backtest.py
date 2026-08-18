@@ -83,6 +83,33 @@ def test_covered_call_respects_share_collateral():
     assert cc_trades == []
 
 
+def test_realized_option_pnl_compounds_into_equity_base():
+    # A non-reinvested option ledger makes NAV == pure-equity-sleeve + Σ option
+    # P&L *exactly* (the pre-fix accounting). The trend model is the pure sleeve
+    # (no options), so folding realized option P&L back into the compounding base
+    # must break that identity by a non-trivial margin.
+    data = _synthetic_data(n=1500, seed=1)
+    trend = run_model(data, "trend")
+    cc = run_model(data, "static_cc")
+    assert cc.kpis["Total Option Trades"] > 0
+    assert abs(cc.kpis["Total Option P&L ($)"]) > 0
+
+    sleeve_end = trend.equity_curve.iloc[-1]  # trend NAV == the pure equity sleeve
+    non_reinvested_end = sleeve_end + cc.kpis["Total Option P&L ($)"]
+    rel = abs(cc.equity_curve.iloc[-1] - non_reinvested_end) / sleeve_end
+    assert rel > 1e-3, f"option P&L is not compounding into the base (rel={rel:.2e})"
+
+
+def test_no_option_models_unaffected_by_reinvestment():
+    # buy_hold and trend hold no options, so the reinvestment change must leave
+    # their NAV paths untouched (Total Option P&L is exactly zero).
+    data = _synthetic_data(n=1500, seed=1)
+    for model in ("buy_hold", "trend"):
+        res = run_model(data, model)
+        assert res.kpis["Total Option P&L ($)"] == 0.0
+        assert res.kpis["Total Option Trades"] == 0
+
+
 def test_credit_profit_target_closes_position():
     # Drive a covered call to a decayed state and confirm the profit-target path.
     cfg = OverlayConfig(model="dynamic")

@@ -10,21 +10,26 @@ Accounting model
 ----------------
 NAV is decomposed as::
 
-    nav = equity_value + realized_option_pnl + unrealized_option_pnl
+    nav = sleeve_value + unrealized_option_pnl
 
-* ``equity_value`` compounds daily by the sleeve return
-  ``w_eq * r_tqqq + (1 - w_eq) * cash_daily`` where ``w_eq`` is the regime's
-  target equity weight and TQQQ's *actual* (already-3x) daily return is used.
-* Each option position contributes its P&L relative to inception,
-  ``(value_now - value_entry) * 100 * contracts`` where ``value`` is the
-  structure's per-share value from a long holder's perspective
+* ``sleeve_value`` is the compounding book (equity + cash). It grows daily by the
+  sleeve return ``w_eq * r_tqqq + (1 - w_eq) * cash_daily`` where ``w_eq`` is the
+  regime's target equity weight and TQQQ's *actual* (already-3x) daily return is
+  used. When an option position closes, its realized P&L is **settled into**
+  ``sleeve_value`` so it compounds thereafter — exactly as a real account's
+  option cashflows reduce (or add to) the capital that keeps compounding.
+* Each open option position contributes its mark-to-market P&L relative to
+  inception, ``(value_now - value_entry) * 100 * contracts`` where ``value`` is
+  the structure's per-share value from a long holder's perspective
   (``sum(direction * leg_price)``). Opening is therefore NAV-neutral, decay of a
   short shows up as positive P&L, and assignment risk shows up as negative P&L.
 
 Options are cash-settled at intrinsic on expiry — a deliberate simplification
 that captures the economics (capped upside on covered calls, tail losses on
-puts) without modelling share assignment. Option P&L is not reinvested into the
-equity sleeve; it accrues linearly, which is mildly conservative.
+puts) without modelling share assignment. Because realized option P&L is folded
+back into the compounding base, the reported returns and drawdowns stay
+self-consistent even when cumulative option P&L is large relative to the book
+(the earlier "linear, non-reinvested" ledger distorted drawdowns in that case).
 """
 
 from __future__ import annotations
@@ -325,7 +330,11 @@ class OptionsOverlayBacktester:
         ret[1:] = close[1:] / close[:-1] - 1.0
         cash_daily = cfg.cash_yield / TRADING_DAYS
 
-        equity_value = cfg.initial_capital
+        # ``sleeve_value`` is the compounding book (equity + cash). Realized option
+        # P&L is settled into it on every close so it compounds thereafter, exactly
+        # as a real account's option cashflows would. ``realized_opt`` is kept only
+        # for reporting the raw (un-compounded) option total.
+        sleeve_value = cfg.initial_capital
         realized_opt = 0.0
         open_positions: list[OptionPosition] = []
         closed: list = []
@@ -352,7 +361,7 @@ class OptionsOverlayBacktester:
                     S, sma[i], atr[i], ivr[i], rsi[i], cfg.regime
                 )
                 w_eq = regime_state.target_equity_pct
-            equity_value *= (1.0 + w_eq * ret[i] + (1.0 - w_eq) * cash_daily)
+            sleeve_value *= (1.0 + w_eq * ret[i] + (1.0 - w_eq) * cash_daily)
 
             # 2. Age and reprice open positions, then apply exit rules.
             regime = regime_state.regime if regime_state else MarketRegime.BULL_EXPANSION
@@ -363,7 +372,9 @@ class OptionsOverlayBacktester:
                 self._reprice(pos, S, sigma_base if sigma_base > 0 else 0.01)
                 reason = self._should_close(pos, regime, ivr[i])
                 if reason is not None:
-                    realized_opt += pos.pnl()
+                    pnl = pos.pnl()
+                    realized_opt += pnl
+                    sleeve_value += pnl  # settle P&L into the compounding book
                     closed.append({
                         "label": pos.label,
                         "action": pos.action.value,
@@ -383,7 +394,7 @@ class OptionsOverlayBacktester:
                     if regime == MarketRegime.BULL_EXPANSION and not any(
                         p.action == OptionAction.SELL_COVERED_CALL for p in open_positions
                     ):
-                        pos = self._static_cc_position(S, sigma_base, equity_value, w_eq, dates[i])
+                        pos = self._static_cc_position(S, sigma_base, sleeve_value, w_eq, dates[i])
                         if pos is not None:
                             open_positions.append(pos)
                             premium_collected += -pos.value_entry * 100 * pos.contracts
@@ -393,7 +404,7 @@ class OptionsOverlayBacktester:
                         p.action == action for p in open_positions
                     ):
                         pos = self._open_position(
-                            action, S, sigma_base, equity_value, w_eq, dates[i]
+                            action, S, sigma_base, sleeve_value, w_eq, dates[i]
                         )
                         if pos is not None:
                             open_positions.append(pos)
@@ -402,16 +413,24 @@ class OptionsOverlayBacktester:
                             else:
                                 debit_paid += pos.value_entry * 100 * pos.contracts
 
-            # 4. Mark NAV.
+            # 4. Mark NAV. Realized P&L is already in sleeve_value; only add the
+            #    mark-to-market of positions still open.
             unrealized = sum(p.pnl() for p in open_positions)
-            nav_curve[i] = equity_value + realized_opt + unrealized
+            nav_curve[i] = sleeve_value + unrealized
+
+        end_unrealized = sum(p.pnl() for p in open_positions)
+        total_option_pnl = realized_opt + end_unrealized
 
         equity_curve = pd.Series(nav_curve, index=dates)
-        kpis = self._compute_kpis(equity_curve, closed, premium_collected, debit_paid)
+        kpis = self._compute_kpis(
+            equity_curve, closed, premium_collected, debit_paid, total_option_pnl
+        )
         return BacktestResult(cfg.model, equity_curve, kpis, closed)
 
     # -- metrics ----------------------------------------------------------- #
-    def _compute_kpis(self, curve: pd.Series, closed, premium_collected, debit_paid) -> dict:
+    def _compute_kpis(
+        self, curve: pd.Series, closed, premium_collected, debit_paid, total_option_pnl
+    ) -> dict:
         cfg = self.cfg
         vals = curve.values.astype(float)
         n = len(vals)
@@ -451,6 +470,7 @@ class OptionsOverlayBacktester:
             "Calmar Ratio (CAGR / MDD)": calmar,
             "Total Option Premium Collected ($)": premium_collected,
             "Total Option Debit Paid ($)": debit_paid,
+            "Total Option P&L ($)": total_option_pnl,
             "Option Win Rate (%)": win_rate,
             "Total Option Trades": len(closed),
         }

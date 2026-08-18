@@ -4,6 +4,43 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2026-08-17] — Fix: options-overlay accounting + first real benchmark
+
+Branch `claude/dynamic-options-overlay-tqqq-hlsp5c`. Continues the overlay work
+from an environment with live Yahoo Finance access: ran the first **real**
+(non-synthetic) benchmark, and fixed an accounting flaw the real data exposed.
+
+### Fixed: realized option P&L now compounds into the book (`overlay_backtest.py`)
+- Previously NAV was `equity_value + realized_option_pnl + unrealized_option_pnl`
+  with the equity sleeve compounding **independently** of option P&L ("linear,
+  not reinvested"). On the real melt-up, cumulative covered-call losses reached
+  ~$2.4M — the same magnitude as the whole book — so the sleeve compounded on
+  capital that, in a real account, would have been paid out to cover those
+  losses. The resulting NAV (a difference of two large, independently-moving
+  numbers) produced distorted drawdowns (Model 3 showed **−94%** MDD on a sleeve
+  whose own MDD is −33%).
+- Now realized option P&L is **settled into `sleeve_value`** on each close, so it
+  compounds thereafter and contract sizing scales off the true book. Models 1–2
+  (no options) are unchanged; Models 3–4 drawdowns are now economically sensible
+  (Model 3 MDD −30%, Model 4 −71%).
+- Added a `Total Option P&L ($)` KPI (raw, un-compounded option total).
+- Regression tests: `test_realized_option_pnl_compounds_into_equity_base`,
+  `test_no_option_models_unaffected_by_reinvestment`.
+
+### Fixed: UTF-8 report encoding (`run_benchmark.py`)
+- `--out` wrote with the platform default codepage, corrupting em-dashes on
+  Windows (`Model 1 �`). Now writes UTF-8 explicitly.
+
+### Added: first real benchmark (`docs/options-overlay-benchmark.md`)
+- 4-model KPI table over 2018-01-02 .. 2026-08-14 on real TQQQ + ^VXN, plus a
+  standing "How to read this" / modeling-caveats block generated with the table.
+- **Headline finding:** the options overlay does **not** improve on the plain
+  SMA+ATR trend model in this window — Model 2 (no options) leads on Sharpe
+  (1.59), Sortino (1.96), Calmar (2.82) and ending value; the overlay caps the
+  melt-up more than it cushions drawdowns.
+
+---
+
 ## [2026-08-17] — Feat: dynamic two-sided options overlay
 
 Branch `claude/dynamic-options-overlay-tqqq-hlsp5c`. Adds a regime-adaptive,

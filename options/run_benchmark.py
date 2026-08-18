@@ -154,11 +154,34 @@ def main(argv=None):
             f"# Options Overlay Benchmark ({span})\n\n"
             f"Initial capital: ${args.capital:,.0f}. TQQQ actual prices; ^VXN as IV proxy.\n\n"
             f"{table}\n\n"
+            f"{_CAVEATS}"
             f"See `options/README.md` for model definitions and accounting assumptions.\n"
         )
-        with open(args.out, "w") as fh:
+        with open(args.out, "w", encoding="utf-8") as fh:
             fh.write(report)
         print(f"Wrote {args.out}")
+
+
+# Standing caveats to reproduce alongside every generated benchmark. These are
+# always-true modeling limitations, not commentary on any particular run.
+_CAVEATS = (
+    "## How to read this\n\n"
+    "Models 2–4 share the identical 3-state equity sleeve, so any difference "
+    "between them is attributable to the options overlay alone. Model 2 (no "
+    "options) is the control.\n\n"
+    "Realized option P&L is settled into the compounding book (a covered-call "
+    "loss reduces the capital that keeps compounding, exactly as in a real "
+    "account), so returns and drawdowns are internally self-consistent even when "
+    "cumulative option P&L is large relative to the book.\n\n"
+    "### Modeling caveats — this is a strategy-comparison signal, not tradeable P&L\n\n"
+    "- Options are cash-settled at intrinsic on expiry (captures capped upside on "
+    "covered calls and tail losses on short puts without modelling assignment).\n"
+    "- Vol input is `^VXN` as a TQQQ IV proxy; skew is a fixed multiplicative "
+    "offset, not a fitted surface.\n"
+    "- TQQQ's actual (already-3x) daily returns drive the equity sleeve; the cash "
+    "sleeve earns a flat `cash_yield`.\n"
+    "- Not modelled: bid/ask, fills, commissions, early assignment, borrow.\n\n"
+)
 
 
 if __name__ == "__main__":  # pragma: no cover
