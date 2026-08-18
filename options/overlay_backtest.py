@@ -85,7 +85,7 @@ class OptionPosition:
 
 @dataclass
 class OverlayConfig:
-    model: str = "dynamic"          # buy_hold | trend | static_cc | dynamic
+    model: str = "dynamic"          # buy_hold | trend | static_cc | dynamic | hedge_only
     initial_capital: float = 10_000.0
     risk_free: float = 0.045
     cash_yield: float = 0.045        # SGOV sleeve annual yield
@@ -108,8 +108,27 @@ class OverlayConfig:
 
     static_cc_delta: float = 0.20    # Model 3 fixed covered-call delta
 
+    # ^VXN is the *1x* Nasdaq-100 vol index, but options here are on the *3x*
+    # TQQQ, whose realized vol runs ~2.5x VXN (measured 2018-2026: median 2.51x,
+    # mean 2.58x). Pricing off raw VXN underprices every option ~2.5x in vol
+    # terms and makes *buying* options look like free money; this multiplier
+    # lifts the pricing/strike-selection vol toward TQQQ's real level. IV-Rank
+    # (regime gating) is a scale-invariant percentile and is left on raw VXN.
+    pricing_iv_mult: float = 2.5
+
     # Sizing caps.
     debit_premium_fraction: float = 0.01  # tail hedge budget as fraction of NAV
+
+    # -- hedge_only model (Model 5): long put-debit hedge held as *insurance* -- #
+    # Insurance semantics differ from the dynamic model's debit *trade*: the hedge
+    # is held through vol spikes (no IVR exit, no -50% stop — those sell protection
+    # exactly when it starts paying off) and is only carried while equity is at
+    # risk. It is rolled near expiry and profit-taken on a crash.
+    hedge_in_bull: bool = True            # carry the hedge in BULL_EXPANSION
+    hedge_in_transition: bool = True      # carry the hedge in TRANSITION_BAND
+    hedge_max_ivr: float = 100.0          # only *open* when IV-Rank <= this (cheap vol)
+    hedge_premium_fraction: float = 0.01  # per-roll budget as fraction of NAV
+    hedge_take_gain: float = 3.0          # let a working hedge run to +200% before taking
 
 
 @dataclass
@@ -150,6 +169,35 @@ class OptionsOverlayBacktester:
             value += leg.direction * g["price"]
         pos._value_now = value
         return value
+
+    # -- hedge_only (Model 5) helpers ------------------------------------- #
+    def _hedge_eligible(self, regime: MarketRegime, iv_rank: float) -> bool:
+        """True when a hedge may be *opened* this day (equity at risk, cheap vol)."""
+        cfg = self.cfg
+        in_zone = (
+            (regime == MarketRegime.BULL_EXPANSION and cfg.hedge_in_bull)
+            or (regime == MarketRegime.TRANSITION_BAND and cfg.hedge_in_transition)
+        )
+        if not in_zone:
+            return False
+        # IV-Rank NaN (warm-up) counts as eligible; only an above-threshold reading blocks.
+        return not (iv_rank == iv_rank and iv_rank > cfg.hedge_max_ivr)
+
+    def _should_close_hedge(self, pos: OptionPosition, regime: MarketRegime) -> str | None:
+        """Insurance-style exits: roll near expiry, take a crash payoff, drop when
+        equity is no longer at risk. Deliberately no IVR-exit and no stop-loss —
+        both would sell protection exactly when it begins to work."""
+        cfg = self.cfg
+        if pos.dte_remaining <= 0:
+            return "EXPIRY"
+        if pos.value_entry > 0 and pos._value_now >= cfg.hedge_take_gain * pos.value_entry:
+            return "HEDGE_TAKE_PROFIT"
+        if pos.dte_remaining <= cfg.min_dte_exit:
+            return "HEDGE_ROLL_21DTE"
+        # Danger passed: fully back into cash (bear sleeve is 100% SGOV) -> stop paying.
+        if regime == MarketRegime.BEAR_DEFENSE:
+            return "HEDGE_REGIME_EXIT"
+        return None
 
     # -- exit decisions ---------------------------------------------------- #
     def _should_close(self, pos: OptionPosition, regime: MarketRegime, iv_rank: float) -> str | None:
@@ -198,6 +246,7 @@ class OptionsOverlayBacktester:
         nav: float,
         w_eq: float,
         date: pd.Timestamp,
+        premium_fraction: float | None = None,
     ) -> OptionPosition | None:
         cfg = self.cfg
         rp = cfg.regime
@@ -261,7 +310,8 @@ class OptionsOverlayBacktester:
             net_debit = long_g["price"] - short_g["price"]
             if net_debit <= 0:
                 return None
-            contracts = sizer.debit_spread_contracts(nav, net_debit, cfg.debit_premium_fraction)
+            frac = cfg.debit_premium_fraction if premium_fraction is None else premium_fraction
+            contracts = sizer.debit_spread_contracts(nav, net_debit, frac)
             if contracts < 1:
                 return None
             legs = [
@@ -343,7 +393,7 @@ class OptionsOverlayBacktester:
 
         nav_curve = np.empty(n)
 
-        options_on = cfg.model in ("static_cc", "dynamic")
+        options_on = cfg.model in ("static_cc", "dynamic", "hedge_only")
         force_full_equity = cfg.model == "buy_hold"
 
         for i in range(n):
@@ -351,6 +401,7 @@ class OptionsOverlayBacktester:
             sigma_base = iv[i] / 100.0 if iv[i] == iv[i] and iv[i] > 1.5 else (
                 iv[i] if iv[i] == iv[i] else 0.0
             )
+            sigma_base *= cfg.pricing_iv_mult  # lift 1x-VXN to TQQQ's ~3x realized vol
 
             # 1. Equity sleeve compounds by the regime weight (uses today's return).
             if force_full_equity:
@@ -370,7 +421,10 @@ class OptionsOverlayBacktester:
                 if i > 0:
                     pos.dte_remaining -= (dates[i] - dates[i - 1]).days
                 self._reprice(pos, S, sigma_base if sigma_base > 0 else 0.01)
-                reason = self._should_close(pos, regime, ivr[i])
+                if cfg.model == "hedge_only":
+                    reason = self._should_close_hedge(pos, regime)
+                else:
+                    reason = self._should_close(pos, regime, ivr[i])
                 if reason is not None:
                     pnl = pos.pnl()
                     realized_opt += pnl
@@ -398,6 +452,16 @@ class OptionsOverlayBacktester:
                         if pos is not None:
                             open_positions.append(pos)
                             premium_collected += -pos.value_entry * 100 * pos.contracts
+                elif cfg.model == "hedge_only":
+                    if self._hedge_eligible(regime, ivr[i]) and not open_positions:
+                        pos = self._open_position(
+                            OptionAction.BUY_PUT_DEBIT_SPREAD, S, sigma_base,
+                            sleeve_value, w_eq, dates[i],
+                            premium_fraction=cfg.hedge_premium_fraction,
+                        )
+                        if pos is not None:
+                            open_positions.append(pos)
+                            debit_paid += pos.value_entry * 100 * pos.contracts
                 else:  # dynamic
                     action = regime_state.option_action
                     if action != OptionAction.IDLE and not any(

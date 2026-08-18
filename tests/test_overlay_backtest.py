@@ -110,6 +110,32 @@ def test_no_option_models_unaffected_by_reinvestment():
         assert res.kpis["Total Option Trades"] == 0
 
 
+def test_pricing_iv_mult_raises_option_prices():
+    # TQQQ options must be priced above the 1x ^VXN level. A higher pricing_iv_mult
+    # must collect more covered-call premium (options are worth more at higher vol).
+    data = _synthetic_data(n=1200, seed=2)
+    low = run_model(data, "static_cc", pricing_iv_mult=1.0)
+    high = run_model(data, "static_cc", pricing_iv_mult=3.0)
+    assert high.kpis["Total Option Premium Collected ($)"] > \
+        low.kpis["Total Option Premium Collected ($)"] * 1.5
+
+
+def test_hedge_only_trades_only_put_debit_spreads():
+    data = _synthetic_data(n=1200, seed=2)
+    res = run_model(data, "hedge_only")
+    assert res.kpis["Total Option Trades"] > 0
+    assert res.kpis["Total Option Premium Collected ($)"] == 0  # never sells premium
+    actions = {c["action"] for c in res.closed_positions}
+    assert actions == {"BUY_PUT_DEBIT_SPREAD"}
+
+
+def test_hedge_only_max_ivr_gate_blocks_opens():
+    # hedge_max_ivr below every IV-Rank reading must suppress all hedge opens.
+    data = _synthetic_data(n=1200, seed=2)
+    res = run_model(data, "hedge_only", hedge_max_ivr=-1.0)
+    assert res.kpis["Total Option Trades"] == 0
+
+
 def test_credit_profit_target_closes_position():
     # Drive a covered call to a decayed state and confirm the profit-target path.
     cfg = OverlayConfig(model="dynamic")

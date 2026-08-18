@@ -59,9 +59,30 @@ regime**.
    regime, ignoring IV-Rank.
 4. **Dynamic** — Model 2 + the full two-sided matrix above.
 
+Plus a research model (`model="hedge_only"`, not in the default table): Model 2 +
+a long put-debit spread held as **insurance** in the bull/transition regimes
+(rolled near expiry, profit-taken on a crash, never sold into a vol spike). It
+tests whether *buying* protection can beat plain Trend — see the finding below.
+
 Reported KPIs: ending value, CAGR, max drawdown + duration, Sharpe (Rf=4.5%),
-Sortino, Calmar, total premium collected, total debit paid, option win-rate, and
-option trade count.
+Sortino, Calmar, total premium collected, total debit paid, total option P&L,
+option win-rate, and option trade count.
+
+### Finding (real data, 2018–2026, pricing vol = VXN × 2.5)
+
+The result **flips entirely on the pricing-vol assumption** (see Accounting).
+Priced at TQQQ's realistic vol, at the empirically-central 2.5× VXN:
+
+- **Covered calls (Model 3) beat Trend** — Calmar 3.4 vs 2.8, Sharpe 1.75 vs
+  1.59, max drawdown −27% vs −33%, at essentially unchanged CAGR. The win is
+  drawdown reduction (robust at 2.0–3.0× vol), not net option profit; capping the
+  top smooths the curve while rich premium keeps return roughly flat.
+- **Buying protection (`hedge_only`) does *not* beat Trend** — it trims crash
+  drawdowns slightly but bleeds enough premium to net a lower Calmar (~2.7). Its
+  apparent "win" only exists when options are mispriced at raw 1× VXN.
+- **The two-sided Dynamic engine is worse than Model 3** — its short-*put*
+  structures add left-tail risk (drawdown −44%). Sell the top; don't add to the
+  bottom.
 
 ## Accounting assumptions
 
@@ -76,8 +97,15 @@ option trade count.
   covered-call loss reduces the capital that keeps compounding — exactly as in a
   real account. This keeps returns and drawdowns self-consistent even when
   cumulative option P&L is large relative to the book.
-* Vol input is ^VXN as a TQQQ IV proxy; the vertical skew is an empirical
-  multiplicative offset, not a fitted surface.
+* **Pricing vol = ^VXN × `pricing_iv_mult` (default 2.5).** ^VXN is the *1×*
+  Nasdaq-100 vol index; these options are on *3×* TQQQ, whose realized vol ran
+  ~2.5× VXN over 2018–2026 (median 2.51×, mean 2.58×). Pricing off raw VXN
+  underprices every option ~2.5× and **inverts the strategy ranking** — buying
+  options looks like free money and selling looks terrible. The default sets
+  implied ≈ realized (no vol-risk premium gifted to either side). IV-Rank
+  (regime gating) is a scale-invariant percentile and stays on raw VXN. Every
+  option result is highly sensitive to this multiplier.
+* The vertical skew is an empirical multiplicative offset, not a fitted surface.
 
 These are backtest-grade approximations. Fills, bid/ask, early assignment, and
 borrow are **not** modelled; treat results as strategy-comparison signal, not

@@ -4,6 +4,40 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2026-08-17] — Fix: price TQQQ options at realistic vol; covered calls beat trend
+
+Branch `claude/dynamic-options-overlay-tqqq-hlsp5c`. Continues the optimization
+search: can any overlay beat the plain Trend model (Model 2, Calmar 2.82)?
+
+### Fixed: pricing vol — `^VXN × 2.5`, not raw `^VXN` (`overlay_backtest.py`)
+- `^VXN` is the *1×* Nasdaq-100 vol index, but the options are on *3×* TQQQ,
+  whose realized vol ran ~2.5× VXN over 2018–2026 (measured: median 2.51×, mean
+  2.58×). Pricing off raw VXN underpriced every option ~2.5× and **inverted the
+  strategy ranking** — it made *buying* options look like free money and *selling*
+  them look terrible. New `OverlayConfig.pricing_iv_mult` (default 2.5) lifts the
+  pricing/strike-selection vol to TQQQ's real level; IV-Rank gating stays on raw
+  VXN (scale-invariant). Test: `test_pricing_iv_mult_raises_option_prices`.
+- **This supersedes the previous run's headline.** At the corrected vol the
+  ranking flips: **Model 3 (covered calls) now beats Trend** — Calmar 3.39 vs
+  2.82, Sharpe 1.75 vs 1.59, MDD −27% vs −33%, at essentially unchanged CAGR
+  (92.9% vs 93.8%). The two-sided Model 4 stays worse (Calmar 2.23; its short-put
+  structures add left-tail risk, MDD −44%).
+
+### Added: `hedge_only` research model (Model 5) (`overlay_backtest.py`)
+- A long put-debit spread held as **insurance** in bull/transition (rolled near
+  expiry, profit-taken on a crash, and — unlike the dynamic model's debit *trade*
+  — never sold into a vol spike or stopped out). New `hedge_*` config knobs.
+- **Finding: buying protection does *not* beat Trend** at realistic vol — it trims
+  crash-window drawdowns slightly but bleeds enough premium to net a lower Calmar
+  (~2.7). Its apparent win only existed at the mispriced 1× VXN. Tests:
+  `test_hedge_only_trades_only_put_debit_spreads`, `..._max_ivr_gate_blocks_opens`.
+
+### Changed
+- Benchmark report and README now regenerate with the pricing-vol assumption
+  stated prominently, and the corrected 4-model table + finding.
+
+---
+
 ## [2026-08-17] — Fix: options-overlay accounting + first real benchmark
 
 Branch `claude/dynamic-options-overlay-tqqq-hlsp5c`. Continues the overlay work
