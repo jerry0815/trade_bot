@@ -4,6 +4,33 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2026-08-17] — Feat: collar model beats the covered call (self-financing hedge)
+
+Branch `claude/dynamic-options-overlay-tqqq-hlsp5c`. Searched past the pure
+sell-call family for something that beats Covered Calls (Calmar 3.39).
+
+### Added: `collar` model (Model 6) (`overlay_backtest.py`)
+- Short ~20Δ overwrite call **+** long ~15Δ protective put on the same equity,
+  rolled in the bull/transition regimes. The call premium finances the put, so it
+  caps the top and cuts the tail for little net cost. New `collar_*` config knobs.
+  Tests: `test_collar_builds_short_call_plus_long_put`, `test_collar_model_runs_and_trades`.
+- **Finding: the collar beats both Trend and Covered Calls, and the edge is robust
+  to the vol assumption.** At 2.5× vol: Calmar ~4.2 (P.15) to 4.4 (P.20) vs Covered
+  Calls 3.39 vs Trend 2.82; MDD −22% vs −27% vs −33%; Sharpe ~2.25 vs 1.75 vs 1.59.
+  The cheap-put variant (P.10) is a near-strict improvement — *higher* CAGR than
+  both **and** lower drawdown, because the put's 2020/2022 crash payoffs more than
+  finance it.
+- **Why it survives the vol test that killed the standalone hedge:** a collar is
+  self-financing — call and put are priced off the same vol, so their vol
+  sensitivities largely cancel; and the drawdown reduction is *mechanical*
+  (strike-based), not vol-dependent. Calmar stays ~4.1–4.8 across 2.0–3.0× vol
+  (vs the lone put hedge, whose "win" existed only at the mispriced 1× VXN).
+- Caveat: the edge leans on crashes actually happening (this window had two); in a
+  crash-free regime the put bleeds and the advantage shrinks toward the covered
+  call. Put skew is a fixed 1.2× offset, not a fitted surface. Single price path.
+
+---
+
 ## [2026-08-17] — Add: taxable-account model for the covered-call overlay
 
 Branch `claude/dynamic-options-overlay-tqqq-hlsp5c`. Promotes covered calls

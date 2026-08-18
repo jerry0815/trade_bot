@@ -164,6 +164,26 @@ def test_taxable_buy_hold_defers_all_gains():
     assert res.kpis["Taxes Paid ($)"] == 0.0
 
 
+def test_collar_builds_short_call_plus_long_put():
+    cfg = OverlayConfig(model="collar")
+    bt = OptionsOverlayBacktester(cfg)
+    pos = bt._collar_position(S=100.0, sigma_base=0.75, nav=1_000_000.0, w_eq=1.0,
+                              date=pd.Timestamp("2020-01-01"))
+    assert pos is not None
+    calls = [lg for lg in pos.legs if lg.option_type == "call"]
+    puts = [lg for lg in pos.legs if lg.option_type == "put"]
+    assert len(calls) == 1 and calls[0].direction == -1   # short call (overwrite)
+    assert len(puts) == 1 and puts[0].direction == +1     # long put (protection)
+    assert puts[0].strike < calls[0].strike               # put below, call above spot
+
+
+def test_collar_model_runs_and_trades():
+    data = _synthetic_data(n=1200, seed=2)
+    res = run_model(data, "collar")
+    assert res.kpis["Total Option Trades"] > 0
+    assert res.kpis["Ending Portfolio Value ($)"] > 0
+
+
 def test_credit_profit_target_closes_position():
     # Drive a covered call to a decayed state and confirm the profit-target path.
     cfg = OverlayConfig(model="dynamic")

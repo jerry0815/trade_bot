@@ -130,6 +130,11 @@ class OverlayConfig:
     hedge_premium_fraction: float = 0.01  # per-roll budget as fraction of NAV
     hedge_take_gain: float = 3.0          # let a working hedge run to +200% before taking
 
+    # -- collar model (Model 6): covered call financing a protective put -- #
+    collar_call_delta: float = 0.20   # short overwrite call
+    collar_put_delta: float = 0.15    # long protective put (financed by the call)
+    dte_collar: int = 30
+
     # -- taxable-account model -------------------------------------------- #
     # When taxable=True the simulator switches to a two-bucket (equity + cash)
     # book with real cost-basis tracking: it trades only on regime changes
@@ -371,6 +376,44 @@ class OptionsOverlayBacktester:
         pos._value_now = pos.value_entry
         return pos
 
+    def _collar_position(self, S, sigma_base, nav, w_eq, date) -> OptionPosition | None:
+        """Model 6: short overwrite call + long protective put on the same equity.
+        The call premium partly (or fully) finances the put, so the structure
+        caps the top AND cuts the tail for little net cost."""
+        cfg = self.cfg
+        dte = cfg.dte_collar
+        T = dte / 365.0
+        r = cfg.risk_free
+        Kc, gc = GreeksEngine.get_strike_for_delta(S, T, r, sigma_base, cfg.collar_call_delta, "call")
+        Kp, gp = GreeksEngine.get_strike_for_delta(S, T, r, sigma_base, cfg.collar_put_delta, "put")
+        shares = (nav * w_eq) / S
+        contracts = sizer.covered_call_contracts(shares)
+        if contracts < 1:
+            return None
+        pos = OptionPosition(
+            action=OptionAction.SELL_COVERED_CALL,
+            contracts=contracts,
+            entry_date=date,
+            entry_dte=dte,
+            dte_remaining=dte,
+            legs=[Leg("call", Kc, -1, CALL_SKEW_MULT), Leg("put", Kp, +1, PUT_SKEW_MULT)],
+            value_entry=float(-gc["price"] + gp["price"]),  # short call credit + long put debit
+            label=f"Collar C{cfg.collar_call_delta:.2f}/P{cfg.collar_put_delta:.2f}",
+        )
+        pos._value_now = pos.value_entry
+        return pos
+
+    def _should_close_collar(self, pos: OptionPosition, regime: MarketRegime) -> str | None:
+        """Roll near expiry; hold the put through the transition crash; drop once
+        the sleeve is fully in cash (bear)."""
+        if pos.dte_remaining <= 0:
+            return "EXPIRY"
+        if pos.dte_remaining <= self.cfg.min_dte_exit:
+            return "COLLAR_ROLL"
+        if regime == MarketRegime.BEAR_DEFENSE:
+            return "COLLAR_REGIME_EXIT"
+        return None
+
     # -- main loop --------------------------------------------------------- #
     def run(self, data: pd.DataFrame) -> BacktestResult:
         cfg = self.cfg
@@ -405,7 +448,7 @@ class OptionsOverlayBacktester:
 
         nav_curve = np.empty(n)
 
-        options_on = cfg.model in ("static_cc", "dynamic", "hedge_only")
+        options_on = cfg.model in ("static_cc", "dynamic", "hedge_only", "collar")
         force_full_equity = cfg.model == "buy_hold"
 
         for i in range(n):
@@ -435,6 +478,8 @@ class OptionsOverlayBacktester:
                 self._reprice(pos, S, sigma_base if sigma_base > 0 else 0.01)
                 if cfg.model == "hedge_only":
                     reason = self._should_close_hedge(pos, regime)
+                elif cfg.model == "collar":
+                    reason = self._should_close_collar(pos, regime)
                 else:
                     reason = self._should_close(pos, regime, ivr[i])
                 if reason is not None:
@@ -474,6 +519,17 @@ class OptionsOverlayBacktester:
                         if pos is not None:
                             open_positions.append(pos)
                             debit_paid += pos.value_entry * 100 * pos.contracts
+                elif cfg.model == "collar":
+                    if regime in (MarketRegime.BULL_EXPANSION, MarketRegime.TRANSITION_BAND) \
+                            and not open_positions:
+                        pos = self._collar_position(S, sigma_base, sleeve_value, w_eq, dates[i])
+                        if pos is not None:
+                            open_positions.append(pos)
+                            net = pos.value_entry * 100 * pos.contracts
+                            if net < 0:
+                                premium_collected += -net
+                            else:
+                                debit_paid += net
                 else:  # dynamic
                     action = regime_state.option_action
                     if action != OptionAction.IDLE and not any(
