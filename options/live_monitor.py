@@ -1,14 +1,17 @@
-"""Daily live scanner for the options overlay.
+"""Daily live scanner for the **collar** overlay (alert-only).
 
-Computes today's regime (price trend x IV-Rank), the resulting equity allocation,
-and the option structure the matrix calls for — with concrete target strikes and
-deltas priced off the current ^VXN level. Emits a formatted report to stdout and,
-if ``DISCORD_WEBHOOK`` is set, posts it there (mirroring ``bot.py``).
+Computes today's trend regime and equity allocation, then — following the
+backtest's conclusion — emits the **collar** the strategy would run: on the TQQQ
+you hold, sell a ~20Δ call and buy a ~15Δ put (~30 DTE), rolled monthly in the
+bull/transition regimes and closed in a bear. It deliberately does **not** emit
+the old two-sided matrix (covered calls / cash-secured puts / bull-put spreads);
+the research found the short-put structures add tail risk and the collar wins.
 
-This is a *monitor*, not an order router: it tells you what the engine would do
-today. Actual fills should be checked against the live chain
-(``yfinance.Ticker("TQQQ").option_chain``), which this module surfaces when
-reachable.
+This is a *monitor*, not an order router: it tells you what to place. A human
+places the trades against the live chain. The model strikes below are guidance at
+TQQQ's realistic vol (~2.5× ^VXN); the actual legs should be the ~20Δ call and
+~15Δ put on the real chain (surfaced best-effort when reachable). IV never needs
+computing for the decision — the chain hands you the deltas.
 
     python -m options.live_monitor
 """
@@ -21,14 +24,17 @@ import numpy as np
 import pandas as pd
 
 from .greeks import GreeksEngine
-from .regime import (
-    MarketRegime,
-    OptionAction,
-    RegimeParams,
-    classify_regime,
-)
+from .regime import MarketRegime, RegimeParams, classify_regime
 from .run_benchmark import _atr, _rsi
 from .iv_loader import compute_iv_rank
+
+# Collar parameters (mirror OverlayConfig defaults for the winning model).
+COLLAR_CALL_DELTA = 0.20
+COLLAR_PUT_DELTA = 0.15
+COLLAR_DTE = 30
+# ^VXN is the 1x Nasdaq-100 vol index; TQQQ (3x) realizes ~2.5x that, so lift the
+# vol before selecting model strikes (see OverlayConfig.pricing_iv_mult).
+PRICING_IV_MULT = 2.5
 
 
 def _latest_frame(params: RegimeParams) -> pd.DataFrame:
@@ -53,39 +59,73 @@ def _latest_frame(params: RegimeParams) -> pd.DataFrame:
     return df.dropna(subset=["Close", "SMA", "ATR", "IV_Rank"])
 
 
-def _target_structure_lines(action: OptionAction, S: float, iv_pct: float,
-                            params: RegimeParams, r: float = 0.045) -> list[str]:
-    """Human-readable target strikes/deltas for the recommended structure."""
-    sigma = iv_pct / 100.0
-    if action == OptionAction.IDLE:
-        return ["• No options active — hold the equity/SGOV sleeve."]
-    if action == OptionAction.SELL_COVERED_CALL:
-        T = 35 / 365
-        K, g = GreeksEngine.get_strike_for_delta(S, T, r, sigma, params.cc_delta, "call")
-        return [f"• Sell 35-DTE covered call ~{params.cc_delta:.2f}Δ  →  strike ≈ {K}",
-                f"  est. credit ≈ ${g['price']*100:,.0f}/contract; close at 50% profit or 21 DTE"]
-    if action == OptionAction.SELL_CASH_SECURED_PUT:
-        T = 30 / 365
-        K, g = GreeksEngine.get_strike_for_delta(S, T, r, sigma, params.csp_delta, "put")
-        return [f"• Sell 30-DTE cash-secured put ~{params.csp_delta:.2f}Δ  →  strike ≈ {K}",
-                f"  est. credit ≈ ${g['price']*100:,.0f}/contract; SGOV-collateralized; 50% TP / 21 DTE"]
-    if action == OptionAction.SELL_BULL_PUT_SPREAD:
-        T = 30 / 365
-        sp = GreeksEngine.spread_strikes(S, T, r, sigma, params.bps_short_delta,
-                                         params.bps_long_delta, "put")
-        return [f"• Sell 30-DTE bull put spread  →  short {sp['short_strike']} / long {sp['long_strike']}",
-                f"  est. credit ≈ ${sp['net_credit']*100:,.0f}/contract; 50% TP / 2x-credit stop / 21 DTE"]
-    if action == OptionAction.BUY_PUT_DEBIT_SPREAD:
-        T = 45 / 365
-        long_K, lg = GreeksEngine.get_strike_for_delta(S, T, r, sigma, params.debit_long_delta, "put")
-        short_K, sg = GreeksEngine.get_strike_for_delta(S, T, r, sigma, params.debit_short_delta, "put")
-        debit = lg["price"] - sg["price"]
-        return [f"• Buy 45-DTE put debit spread  →  long {long_K} / short {short_K}",
-                f"  est. debit ≈ ${debit*100:,.0f}/contract; take +100% or exit if IVR>55; -50% stop"]
-    return ["• (unrecognized action)"]
+def _collar_structure_lines(S: float, iv_pct: float, r: float = 0.045) -> list[str]:
+    """Model-guidance strikes for the collar, priced at TQQQ's realistic vol.
+    Pure/offline-testable."""
+    sigma = iv_pct / 100.0 * PRICING_IV_MULT
+    T = COLLAR_DTE / 365.0
+    Kc, gc = GreeksEngine.get_strike_for_delta(S, T, r, sigma, COLLAR_CALL_DELTA, "call")
+    Kp, gp = GreeksEngine.get_strike_for_delta(S, T, r, sigma, COLLAR_PUT_DELTA, "put")
+    credit = gc["price"] * 100
+    debit = gp["price"] * 100
+    net = credit - debit
+    net_word = "net credit" if net >= 0 else "net debit"
+    return [
+        f"• Sell {COLLAR_DTE}-DTE call ~{COLLAR_CALL_DELTA:.2f}Δ  →  strike ≈ {Kc}"
+        f"   (est. credit ${credit:,.0f}/contract)",
+        f"• Buy  {COLLAR_DTE}-DTE put  ~{COLLAR_PUT_DELTA:.2f}Δ  →  strike ≈ {Kp}"
+        f"   (est. debit ${debit:,.0f}/contract)",
+        f"• {net_word} ≈ ${abs(net):,.0f}/contract  |  one collar per 100 shares of TQQQ held",
+        "• Manage: roll at 21 DTE; hold the put through a transition; close the "
+        "collar (both legs) on a bear signal — never sell puts.",
+        "⚠️ Strikes are model guidance — place the actual ~0.20Δ call / ~0.15Δ put "
+        "off the live chain and check the bid/ask.",
+    ]
 
 
-def build_report(params: RegimeParams = RegimeParams()) -> str:
+def _live_chain_lines(S: float, r: float = 0.045) -> list[str]:  # pragma: no cover - network
+    """Best-effort: surface the real ~20Δ call and ~15Δ put from the live TQQQ
+    chain near 30 DTE. Degrades gracefully to a single note on any failure."""
+    try:
+        import yfinance as yf
+
+        tk = yf.Ticker("TQQQ")
+        expiries = tk.options
+        if not expiries:
+            return []
+        today = pd.Timestamp.utcnow().normalize().tz_localize(None)
+        target = today + pd.Timedelta(days=COLLAR_DTE)
+        expiry = min(expiries, key=lambda e: abs((pd.Timestamp(e) - target).days))
+        dte = (pd.Timestamp(expiry) - today).days
+        T = max(dte, 1) / 365.0
+        chain = tk.option_chain(expiry)
+
+        def pick(dfrac, kind, want_delta):
+            best, best_gap = None, 1e9
+            for _, row in dfrac.iterrows():
+                iv = float(row.get("impliedVolatility", 0) or 0)
+                if iv <= 0:
+                    continue
+                d = abs(GreeksEngine.calculate_greeks(S, float(row["strike"]), T, r, iv, kind)["delta"])
+                gap = abs(d - want_delta)
+                if gap < best_gap:
+                    best, best_gap = row, gap
+            return best
+
+        c = pick(chain.calls, "call", COLLAR_CALL_DELTA)
+        p = pick(chain.puts, "put", COLLAR_PUT_DELTA)
+        if c is None or p is None:
+            return []
+        return [
+            f"🔗 **Live chain** (exp {expiry}, {dte} DTE):",
+            f"   call {c['strike']:.0f}  bid {c['bid']:.2f} / ask {c['ask']:.2f}",
+            f"   put  {p['strike']:.0f}  bid {p['bid']:.2f} / ask {p['ask']:.2f}",
+        ]
+    except Exception as exc:
+        return [f"🔗 Live chain unavailable ({type(exc).__name__}); use the model strikes above."]
+
+
+def build_report(params: RegimeParams = RegimeParams(), with_chain: bool = True) -> str:
     df = _latest_frame(params)
     row = df.iloc[-1]
     S = float(row["Close"])
@@ -102,18 +142,36 @@ def build_report(params: RegimeParams = RegimeParams()) -> str:
 
     date_str = df.index[-1].strftime("%Y-%m-%d")
     lines = [
-        f"📅 **Options Overlay Monitor ({date_str})**",
+        f"📅 **Collar Overlay Monitor ({date_str})**",
         "--------------------------",
         f"📈 **TQQQ** {S:.2f} | SMA200 {row['SMA']:.2f} | ATR14 {row['ATR']:.2f}",
         f"• Regime bands: {st.lower_bound:.2f} — {st.upper_bound:.2f}",
-        f"• IV (^VXN): {row['IV']:.2f}  |  IV-Rank(252d): {row['IV_Rank']:.1f}  |  RSI14: {row['RSI']:.1f}",
+        f"• IV (^VXN): {row['IV']:.2f}  |  RSI14: {row['RSI']:.1f}",
         "--------------------------",
         f"{regime_emoji} **REGIME: {st.regime.value}**",
         f"• Equity allocation: **{alloc}**",
-        f"• Option signal: **{st.option_action.value}**",
+    ]
+
+    if st.regime == MarketRegime.BEAR_DEFENSE:
+        lines += [
+            "• Options: **NONE** — hold 100% cash/SGOV.",
+            "--------------------------",
+            "🎯 **ACTION**",
+            "• Close any open collar (both legs). Do **not** sell puts here.",
+        ]
+    else:
+        lines += [
+            "• Options: **COLLAR** (sell call + buy put on the TQQQ you hold).",
+            "--------------------------",
+            "🎯 **TARGET STRUCTURE — COLLAR**",
+            *_collar_structure_lines(S, float(row["IV"])),
+        ]
+        if with_chain:
+            lines += _live_chain_lines(S)
+
+    lines += [
         "--------------------------",
-        "🎯 **TARGET OPTION STRUCTURE**",
-        *_target_structure_lines(st.option_action, S, float(row["IV"]), params),
+        "ℹ️ Alert only — a human confirms and places the trades. Not investment advice.",
     ]
     return "\n".join(lines)
 

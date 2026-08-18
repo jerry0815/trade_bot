@@ -1,10 +1,11 @@
-name: Options Overlay Monitor
+name: Collar Overlay Monitor
 
-# Daily scan of the dynamic two-sided options overlay: today's regime
-# (price trend x IV-Rank), the target equity allocation, and the option
-# structure the matrix calls for. Posts to Discord via the DISCORD_WEBHOOK
-# secret (the same one bot.py uses). Set that secret in the repo settings;
-# if it is empty the report is just printed to the Actions log.
+# Daily scan of the collar overlay (the backtest's winning model): today's trend
+# regime, the target equity allocation, and the collar to run (sell ~20d call +
+# buy ~15d put on the TQQQ held), with a best-effort look at the live chain.
+# Alert-only. Posts to Discord via the DISCORD_WEBHOOK secret (the same one
+# bot.py uses). Set that secret in the repo settings; if it is empty the report
+# is just printed to the Actions log.
 
 on:
   schedule:

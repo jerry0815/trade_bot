@@ -4,6 +4,26 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2026-08-17] — Feat: collar live monitor (the execution hook)
+
+Branch `claude/dynamic-options-overlay-tqqq-hlsp5c`. Points the daily monitor at
+the backtest's winning model so the research becomes an actionable daily alert.
+
+### Changed: `options/live_monitor.py` now emits the collar (alert-only)
+- Replaces the old two-sided-matrix signal (covered call / CSP / bull-put spread —
+  the structures the research rejected) with the **collar**: sell ~20Δ call + buy
+  ~15Δ put (~30 DTE) on the TQQQ held, in the bull/transition regimes; close both
+  legs and hold cash in a bear (never sell puts).
+- Model-guidance strikes are priced at TQQQ's realistic vol (`^VXN × 2.5`), with a
+  best-effort look at the **live option chain** (nearest ~30-DTE expiry, actual
+  ~20Δ call / ~15Δ put bid/ask) that degrades gracefully when unreachable.
+- Strictly alert-only — a human confirms and places the trades; carries a
+  not-investment-advice line. Tests: `test_live_monitor.py` (2). 61 green.
+- Workflow renamed to "Collar Overlay Monitor"; still posts via the
+  `DISCORD_WEBHOOK` repo secret (set it in repo settings — not in the YAML).
+
+---
+
 ## [2026-08-17] — Add: reconstructed-TQQQ backtest to 2001 (dot-com + 2008)
 
 Branch `claude/dynamic-options-overlay-tqqq-hlsp5c`. Real TQQQ starts 2010, so the
