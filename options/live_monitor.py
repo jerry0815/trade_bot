@@ -176,9 +176,19 @@ def build_report(params: RegimeParams = RegimeParams(), with_chain: bool = True)
     return "\n".join(lines)
 
 
+def select_webhook(env: dict | None = None) -> str | None:
+    """Prefer the options-specific channel, fall back to the shared bot webhook.
+
+    Set ``OPTIONS_DISCORD_WEBHOOK`` (its own repo secret / Discord channel) to
+    route collar alerts away from the main trend bot; if only ``DISCORD_WEBHOOK``
+    is set they share a channel (backward compatible)."""
+    env = os.environ if env is None else env
+    return env.get("OPTIONS_DISCORD_WEBHOOK") or env.get("DISCORD_WEBHOOK") or None
+
+
 def main():  # pragma: no cover - network + side effects
     report = build_report()
-    webhook = os.environ.get("DISCORD_WEBHOOK")
+    webhook = select_webhook()
     if webhook:
         import requests
         requests.post(webhook, json={"content": report})
