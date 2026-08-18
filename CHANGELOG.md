@@ -4,6 +4,31 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2026-08-18] — Docs: extend options backtest to 1990; correct dot-com finding
+
+Extends the reconstructed-TQQQ backtest left to **1990** (the `^VIX` inception that
+bounds the pricing-vol proxy) and, in doing so, corrects a measurement error and a
+conclusion.
+
+- **Corrected the dot-com drawdown.** The earlier 2001-start extended run began
+  *after* the March-2000 crash, so its "DD dot-com" (−20.7%) measured only the slow
+  2001–2002 grind and understated the crash. Measured from the March-2000 peak, the
+  fast April-2000 crash is the true worst case (Trend −54%).
+- **Conclusion changed: covered calls are no longer a runner-up.** Against the fast
+  April-2000 crash a premium cushion is worthless — covered calls draw down −55%
+  (Calmar 1.42, *below* Trend's 1.65) and the two-sided engine −74% (1.21). **Only
+  the collar's protective put survives** (−26%/−20%), making it the *only* overlay
+  that beats plain Trend over the full 1990–2026 history (Calmar 3.1–3.6). Covered
+  calls only led over the crash-light 2018–2026 / 2001-start windows.
+- **Docs made consistent:** the strategy doc (`docs/strategies/options-overlay.md`)
+  now carries a single merged 1990–2026 table with Sharpe; the extended doc
+  (`docs/options-overlay-extended-2001.md`) is rewritten to 1990–2026 with the fix;
+  the 2018–2026 benchmark and README carry a crash-light-window caveat pointing to
+  the full-history result. No code logic changed (reconstruction already supported
+  the `^VIX` fallback); documentation + a generated-report caveat only.
+
+---
+
 ## [2026-08-18] — Docs: options-overlay strategy doc (collar results)
 
 Adds `docs/strategies/options-overlay.md` in the per-strategy house style,

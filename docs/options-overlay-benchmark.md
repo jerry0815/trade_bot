@@ -22,6 +22,8 @@ Initial capital: $10,000. TQQQ actual prices; ^VXN as IV proxy.
 
 Models 2–4 share the identical 3-state equity sleeve, so any difference between them is attributable to the options overlay alone. Model 2 (no options) is the control.
 
+> ⚠️ **This is the 2018–2026 window, which had no prolonged bear — it is crash-light.** Covered calls lead here, but that lead does *not* survive a fast leveraged crash: over the full 1990–2026 history (which includes the fast April-2000 dot-com crash), covered calls fall *below* plain Trend and only the collar — with a real protective put — beats it. See `docs/options-overlay-extended-2001.md` and `docs/strategies/options-overlay.md` for the full-history result.
+
 Realized option P&L is settled into the compounding book (a covered-call loss reduces the capital that keeps compounding, exactly as in a real account), so returns and drawdowns are internally self-consistent even when cumulative option P&L is large relative to the book.
 
 ### Modeling caveats — this is a strategy-comparison signal, not tradeable P&L

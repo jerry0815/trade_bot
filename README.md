@@ -25,7 +25,7 @@ The **recommended action** is "in the market" only when both indices agree bulli
 
 ### Experimental — Options Overlay (Collar)
 
-A separate, self-contained [`options/`](options/) package tests which option structure best complements the trend model on leveraged (3× TQQQ) exposure. After fixing the pricing model and comparing five structures across the vol assumption and every crash since 2001, the winner is a **collar** — sell a ~20Δ call and buy a ~15Δ put on the TQQQ held, monthly, in the bull/transition regimes. It beats plain Trend on a risk-adjusted basis (Calmar ~4.2 vs 2.82) by cutting drawdown, and the edge is structural rather than fitted. The two-sided premium-selling engine was *rejected* (its short puts add tail risk). Research/experimental, independent of the production `bot.py` recommendation. See [Options Overlay](docs/strategies/options-overlay.md) for the results and [`options/README.md`](options/README.md) for the engine.
+A separate, self-contained [`options/`](options/) package tests which option structure best complements the trend model on leveraged (3× TQQQ) exposure. After fixing the pricing model and comparing five structures across the vol assumption and every crash since 1990 (on a reconstructed TQQQ), the winner is a **collar** — sell a ~20Δ call and buy a ~15Δ put on the TQQQ held, monthly, in the bull/transition regimes. It is the *only* overlay that beats plain Trend over the full history (Calmar ~3.1–3.6 vs 1.65), because its protective put is the only thing that survives the fast April-2000 dot-com crash — plain covered calls and the two-sided premium engine both fall *below* Trend there. The edge is structural (self-financing → vol-robust), not fitted. Research/experimental, independent of the production `bot.py` recommendation. See [Options Overlay](docs/strategies/options-overlay.md) for the results and [`options/README.md`](options/README.md) for the engine.
 
 ---
 
@@ -62,7 +62,7 @@ Each strategy/feature has its own doc with the mechanics, its full result tables
 | **QQQ (1x)** | Unleveraged cross-check: dual-signal agreement again best at 14.69% Avg TWR / 9 trades; validates Table 1's 1x tier. | [qqq-1x](docs/strategies/qqq-1x.md) |
 | **Tax treatment** | After tax, the stop's return edge inverts for the dual pair (23.61% no-stop vs 19.82% with stop) — hence no stop in taxable accounts. | [tax-treatment](docs/strategies/tax-treatment.md) |
 | **Global equities** (MSCI World+EM → VT) | Strategy ranking holds on a global base — EMA 50/200 leads at every tier — at lower return levels than US tech (reconstruction cross-check). | [global-equities](docs/strategies/global-equities.md) |
-| **Options overlay** (experimental) | A collar (sell ~20Δ call + buy ~15Δ put) on the trend model beats plain Trend on risk-adjusted return (Calmar ~4.2 vs 2.82) by cutting drawdown; vol-robust, tested to 2001. | [options-overlay](docs/strategies/options-overlay.md) |
+| **Options overlay** (experimental) | A collar (sell ~20Δ call + buy ~15Δ put) is the only overlay that beats plain Trend over 1990–2026 (Calmar ~3.1–3.6 vs 1.65) — its put survives the fast dot-com crash where plain covered calls fail. | [options-overlay](docs/strategies/options-overlay.md) |
 
 ---
 
