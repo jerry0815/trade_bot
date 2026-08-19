@@ -83,6 +83,26 @@ def test_covered_call_respects_share_collateral():
     assert cc_trades == []
 
 
+def test_trend_sleeve_has_no_lookahead():
+    # Today's return must be earned at YESTERDAY's target weight (T+1 / next-day
+    # execution), not today's — using today's close to size today's return is a
+    # 1-day lookahead that massively inflates a leveraged trend strategy.
+    data = _synthetic_data(n=1000, seed=5)
+    res = run_model(data, "trend")
+    close = data["Close"]; ret = close.pct_change().fillna(0.0)
+    buf = 1.5 * data["ATR"]
+    w = pd.Series(0.5, index=data.index)
+    w[close > data["SMA"] + buf] = 1.0
+    w[close < data["SMA"] - buf] = 0.0
+    cash = 0.045 / 252
+    w_prev = w.shift(1).fillna(w.iloc[0])
+    t1 = (1 + w_prev * ret + (1 - w_prev) * cash).cumprod()          # no lookahead
+    same = (1 + w * ret + (1 - w) * cash).cumprod()                  # lookahead
+    end = res.equity_curve.iloc[-1] / res.kpis["Initial Capital ($)"]
+    assert abs(end - t1.iloc[-1]) / t1.iloc[-1] < 0.02, "trend sleeve should match T+1"
+    assert abs(end - same.iloc[-1]) / same.iloc[-1] > 0.05, "trend sleeve must NOT match same-day"
+
+
 def test_realized_option_pnl_compounds_into_equity_base():
     # A non-reinvested option ledger makes NAV == pure-equity-sleeve + Σ option
     # P&L *exactly* (the pre-fix accounting). The trend model is the pure sleeve

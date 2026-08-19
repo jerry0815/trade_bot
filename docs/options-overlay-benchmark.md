@@ -5,18 +5,18 @@ Initial capital: $10,000. TQQQ actual prices; ^VXN as IV proxy.
 | Metric | Model 1 — Buy & Hold TQQQ | Model 2 — Trend (SMA+ATR, no options) | Model 3 — Static Covered Calls | Model 4 — Dynamic Two-Sided Engine |
 | --- | --- | --- | --- | --- |
 | Initial Capital ($) | $10,000 | $10,000 | $10,000 | $10,000 |
-| Ending Portfolio Value ($) | $126,369 | $2,980,809 | $2,866,992 | $3,504,880 |
-| CAGR (%) | 34.25% | 93.76% | 92.89% | 97.44% |
-| Max Drawdown (MDD %) | -81.75% | -33.26% | -27.43% | -43.60% |
-| Max Drawdown Duration (Days) | 1,117 | 439 | 320 | 230 |
-| Sharpe Ratio (Rf=4.5%) | 0.71 | 1.59 | 1.75 | 1.54 |
-| Sortino Ratio | 0.93 | 1.96 | 2.07 | 1.86 |
-| Calmar Ratio (CAGR / MDD) | 0.42 | 2.82 | 3.39 | 2.23 |
-| Total Option Premium Collected ($) | $0 | $0 | $2,724,875 | $1,911,400 |
-| Total Option Debit Paid ($) | $0 | $0 | $0 | $604,861 |
-| Total Option P&L ($) | $0 | $0 | $-144,242 | $240,933 |
-| Option Win Rate (%) | n/a | n/a | 63.03% | 43.16% |
-| Total Option Trades | 0 | 0 | 284 | 190 |
+| Ending Portfolio Value ($) | $126,369 | $42,420 | $41,519 | $44,147 |
+| CAGR (%) | 34.25% | 18.27% | 17.97% | 18.82% |
+| Max Drawdown (MDD %) | -81.75% | -64.56% | -63.24% | -77.59% |
+| Max Drawdown Duration (Days) | 1,117 | 599 | 600 | 1,780 |
+| Sharpe Ratio (Rf=4.5%) | 0.71 | 0.50 | 0.50 | 0.52 |
+| Sortino Ratio | 0.93 | 0.56 | 0.53 | 0.53 |
+| Calmar Ratio (CAGR / MDD) | 0.42 | 0.28 | 0.28 | 0.24 |
+| Total Option Premium Collected ($) | $0 | $0 | $74,951 | $56,172 |
+| Total Option Debit Paid ($) | $0 | $0 | $0 | $14,935 |
+| Total Option P&L ($) | $0 | $0 | $-3,372 | $5,998 |
+| Option Win Rate (%) | n/a | n/a | 63.03% | 44.51% |
+| Total Option Trades | 0 | 0 | 284 | 182 |
 
 ## How to read this
 

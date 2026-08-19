@@ -4,6 +4,32 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2026-08-18] — Fix: T+1 execution in the overlay engine (remove lookahead)
+
+The options-overlay backtester sized each day's return with *that day's* close — a
+1-day lookahead that inflated every trend-based CAGR ~4× (e.g. Trend 88% → 22%).
+The equity sleeve now applies the **prior day's** weight to today's return
+(next-day / T+1 execution), matching the production engine. Options were unaffected
+(opening is NAV-neutral). Fix in `run()` and `_run_taxable()`; regression test
+`test_trend_sleeve_has_no_lookahead`.
+
+- **Full re-validation.** All overlay numbers regenerated at realistic levels, now
+  in the same ~20% CAGR / deep-drawdown range as the production dual-signal rolling
+  tables (a check the fix landed). Benchmark, extended (1990–2026), and strategy
+  docs updated; the earlier inflated Calmars (2.8–4.4) are replaced by realistic
+  ones (~0.2–0.45).
+- **Conclusion holds, magnitude shrinks.** The collar is still the best overlay —
+  shallowest drawdowns and best worst-case, the only one beating Buy & Hold long
+  term — but it is a *modest tail-risk reducer*, not a return engine. Covered calls
+  are the worst overlay (cap upside, no tail protection). Added caveat that the
+  overlay's naive single-signal trend sleeve is weaker than `bot.py`, so the result
+  does not automatically transfer.
+- **Added `options/rolling_benchmark.py`** — 26-year rolling harness matching the
+  repo's methodology (Avg/Med/Worst CAGR + Worst DD), so overlay results are
+  directly comparable. Offline tests for its window/format logic. 68 tests green.
+
+---
+
 ## [2026-08-18] — Feat: collar position-state tracking in the live monitor
 
 Makes the daily collar alert speak to the position you actually hold, not just the

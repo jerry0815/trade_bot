@@ -68,21 +68,25 @@ Reported KPIs: ending value, CAGR, max drawdown + duration, Sharpe (Rf=4.5%),
 Sortino, Calmar, total premium collected, total debit paid, total option P&L,
 option win-rate, and option trade count.
 
-### Finding (real data, 2018–2026, pricing vol = VXN × 2.5)
+### Finding (T+1 execution, pricing vol = VXN × 2.5)
 
-The result **flips entirely on the pricing-vol assumption** (see Accounting).
-Priced at TQQQ's realistic vol, at the empirically-central 2.5× VXN:
+Full results and tables live in
+[`docs/strategies/options-overlay.md`](../docs/strategies/options-overlay.md);
+the short version, over 1990–2026 and 26-year rolling windows:
 
-- **Covered calls (Model 3) beat Trend** — Calmar 3.4 vs 2.8, Sharpe 1.75 vs
-  1.59, max drawdown −27% vs −33%, at essentially unchanged CAGR. The win is
-  drawdown reduction (robust at 2.0–3.0× vol), not net option profit; capping the
-  top smooths the curve while rich premium keeps return roughly flat.
-- **Buying protection (`hedge_only`) does *not* beat Trend** — it trims crash
-  drawdowns slightly but bleeds enough premium to net a lower Calmar (~2.7). Its
-  apparent "win" only exists when options are mispriced at raw 1× VXN.
-- **The two-sided Dynamic engine is worse than Model 3** — its short-*put*
-  structures add left-tail risk (drawdown −44%). Sell the top; don't add to the
-  bottom.
+- **The collar (sell ~20Δ call + buy ~15Δ put) is the best overlay** — shallowest
+  drawdowns and best worst-case return, the only overlay that beats Buy & Hold over
+  the long history (rolling: worst-case DD −60% vs Trend −65%, worst-case CAGR 13.3%
+  vs 12.3%). Its edge is *mechanical drawdown protection* from the put, robust across
+  2.0–3.0× VXN.
+- **Covered calls are the *worst* overlay** — a premium cushion caps the upside but
+  cannot protect a fast leveraged crash (−65% dot-com DD, same as plain Trend).
+- **The two-sided Dynamic engine is worse still** — its short *put* structures add
+  left-tail risk (−85% dot-com DD). Sell the top; don't add to the bottom.
+- The edge is *modest* (realistic Calmar ~0.45 vs Trend ~0.37), and the trend sleeve
+  here is a naive single-signal SMA200 — weaker than the production `bot.py`, so the
+  result does not automatically transfer to it. Earlier drafts quoted ~4×-larger
+  numbers from a since-fixed lookahead bug.
 
 ## Accounting assumptions
 

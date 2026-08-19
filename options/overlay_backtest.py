@@ -441,6 +441,7 @@ class OptionsOverlayBacktester:
         # for reporting the raw (un-compounded) option total.
         sleeve_value = cfg.initial_capital
         realized_opt = 0.0
+        w_eq_prev = 1.0  # weight held into today (set from yesterday's close — T+1)
         open_positions: list[OptionPosition] = []
         closed: list = []
         premium_collected = 0.0
@@ -458,7 +459,10 @@ class OptionsOverlayBacktester:
             )
             sigma_base *= cfg.pricing_iv_mult  # lift 1x-VXN to TQQQ's ~3x realized vol
 
-            # 1. Equity sleeve compounds by the regime weight (uses today's return).
+            # 1. Regime/weight are decided from *today's* close, but govern the
+            #    position held from today's close into tomorrow — so today's return
+            #    is earned at YESTERDAY's weight (T+1 / next-day execution). Applying
+            #    today's weight to today's return would be a 1-day lookahead.
             if force_full_equity:
                 w_eq = 1.0
                 regime_state = None
@@ -467,7 +471,8 @@ class OptionsOverlayBacktester:
                     S, sma[i], atr[i], ivr[i], rsi[i], cfg.regime
                 )
                 w_eq = regime_state.target_equity_pct
-            sleeve_value *= (1.0 + w_eq * ret[i] + (1.0 - w_eq) * cash_daily)
+            sleeve_value *= (1.0 + w_eq_prev * ret[i] + (1.0 - w_eq_prev) * cash_daily)
+            w_eq_prev = w_eq
 
             # 2. Age and reprice open positions, then apply exit rules.
             regime = regime_state.regime if regime_state else MarketRegime.BULL_EXPANSION
@@ -628,7 +633,16 @@ class OptionsOverlayBacktester:
                 w_eq = regime_state.target_equity_pct
             regime = regime_state.regime if regime_state else MarketRegime.BULL_EXPANSION
 
-            # Rebalance only when the target weight actually changes (or day 0).
+            # Grow the two buckets first: today's return is earned on the holdings
+            # carried in from yesterday's rebalance (T+1). SGOV interest is income.
+            # Day 0 is the deposit/deploy day — no return accrues before allocation.
+            interest = cash_mv * cash_daily if i > 0 else 0.0
+            equity_mv *= (1.0 + ret[i])
+            cash_mv += interest
+            realized_ytd += interest
+
+            # Then rebalance to today's target (at the close; governs tomorrow's
+            # return). Trades only when the target weight actually changes (or day 0).
             if prev_w is None or w_eq != prev_w:
                 total = equity_mv + cash_mv
                 target = w_eq * total
@@ -645,12 +659,6 @@ class OptionsOverlayBacktester:
                     equity_basis += buy
                     cash_mv -= buy
                 prev_w = w_eq
-
-            # Grow the two buckets; SGOV interest is ordinary income.
-            interest = cash_mv * cash_daily
-            equity_mv *= (1.0 + ret[i])
-            cash_mv += interest
-            realized_ytd += interest
 
             # Age / reprice / close options; realized option P&L is cash + taxable.
             still_open: list[OptionPosition] = []
