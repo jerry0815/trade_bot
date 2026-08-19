@@ -4,6 +4,22 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2026-08-18] — Feat: collar position-state tracking in the live monitor
+
+Makes the daily collar alert speak to the position you actually hold, not just the
+generic signal — the maintenance layer.
+
+- `live_monitor.py` reads a recorded collar from `options/collar_position.json`
+  (or `COLLAR_POSITION_FILE`) and adds a **YOUR OPEN COLLAR** block: a roll
+  countdown while healthy, **ROLL NOW** at ≤21 DTE, **close both legs** on a bear
+  signal, and an **expired** notice past expiry. Stateless/no-file behavior is
+  unchanged (it prompts you to record a position once placed).
+- New pure functions `load_position()` / `position_maintenance_lines()`, an
+  example file `options/collar_position.example.json`, and 3 tests (65 green).
+  Maintenance workflow documented in `options/README.md`.
+
+---
+
 ## [2026-08-18] — Docs: extend options backtest to 1990; correct dot-com finding
 
 Extends the reconstructed-TQQQ backtest left to **1990** (the `^VIX` inception that

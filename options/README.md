@@ -123,12 +123,29 @@ python -m options.run_benchmark --start 2018-01-01 --end 2026-08-17 \
 # refresh the IV-Rank history CSV:
 python -m options.iv_loader
 
-# today's regime + target option structure (posts to DISCORD_WEBHOOK if set):
+# today's regime + collar to place/roll (posts to OPTIONS_DISCORD_WEBHOOK if set):
 python -m options.live_monitor
 
 # unit tests:
 python -m pytest tests/ -q
 ```
+
+### Tracking your open collar (maintenance)
+
+`live_monitor` is alert-only and stateless by default. To have the daily alert
+track *your* position's roll, record the collar you placed in a JSON file
+(template: `options/collar_position.example.json`):
+
+```json
+{"open": true, "entry_date": "2026-08-15", "expiry": "2026-09-18",
+ "call_strike": 88, "put_strike": 65, "contracts": 3}
+```
+
+Save it as `options/collar_position.json` (or point `COLLAR_POSITION_FILE` at it;
+commit it if you want the CI alert to see it). The report then adds a **YOUR OPEN
+COLLAR** block: a roll countdown while healthy, **ROLL NOW** at ≤21 DTE, **close
+both legs** on a bear signal, and an **expired** notice past expiry. Update the
+file's `expiry`/`strike` fields each time you roll; set `open: false` when flat.
 
 > **Sandbox note:** some CI/agent sandboxes route yfinance through a proxy whose
 > egress IP Yahoo rate-limits (HTTP 429). `_net.py` handles the proxy's TLS

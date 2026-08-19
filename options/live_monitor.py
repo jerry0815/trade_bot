@@ -18,7 +18,9 @@ computing for the decision — the chain hands you the deltas.
 
 from __future__ import annotations
 
+import json
 import os
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -35,6 +37,12 @@ COLLAR_DTE = 30
 # ^VXN is the 1x Nasdaq-100 vol index; TQQQ (3x) realizes ~2.5x that, so lift the
 # vol before selecting model strikes (see OverlayConfig.pricing_iv_mult).
 PRICING_IV_MULT = 2.5
+
+# Roll a collar this many DTE or fewer (matches OverlayConfig.min_dte_exit).
+ROLL_DTE = 21
+# Where the user records the collar they actually placed, so the alert can track
+# its roll. Override with the COLLAR_POSITION_FILE env var.
+DEFAULT_POSITION_FILE = "options/collar_position.json"
 
 
 def _latest_frame(params: RegimeParams) -> pd.DataFrame:
@@ -125,6 +133,54 @@ def _live_chain_lines(S: float, r: float = 0.045) -> list[str]:  # pragma: no co
         return [f"🔗 Live chain unavailable ({type(exc).__name__}); use the model strikes above."]
 
 
+def load_position(path: str | None = None) -> dict | None:
+    """Read the collar the user recorded as placed, or None if absent/closed.
+
+    JSON fields: ``{"open": true, "entry_date": "YYYY-MM-DD",
+    "expiry": "YYYY-MM-DD", "call_strike": <num>, "put_strike": <num>,
+    "contracts": <int>}``. Looks at ``COLLAR_POSITION_FILE`` then ``path`` then
+    ``options/collar_position.json``. A missing/unparseable file, or one with
+    ``open: false`` or no ``expiry``, reads as *no position* (the alert then just
+    tells you to open one)."""
+    p = Path(os.environ.get("COLLAR_POSITION_FILE") or path or DEFAULT_POSITION_FILE)
+    if not p.exists():
+        return None
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        return None
+    if not isinstance(data, dict) or data.get("open") is False or not data.get("expiry"):
+        return None
+    return data
+
+
+def position_maintenance_lines(position: dict | None, today: pd.Timestamp,
+                               regime: MarketRegime, roll_dte: int = ROLL_DTE) -> list[str]:
+    """Maintenance guidance for the recorded open collar. Pure/offline-testable."""
+    if position is None:
+        if regime != MarketRegime.BEAR_DEFENSE:
+            return ["📋 No open collar recorded — after you place one, save it to "
+                    "`options/collar_position.json` so this alert can track its roll."]
+        return []
+
+    expiry = pd.Timestamp(position["expiry"]).normalize()
+    dte = int((expiry - today).days)
+    ref = (f"opened {position.get('entry_date', '?')}, "
+           f"call {position.get('call_strike', '?')} / put {position.get('put_strike', '?')}"
+           + (f" ×{position['contracts']}" if position.get("contracts") else ""))
+    head = f"📋 **YOUR OPEN COLLAR** — exp {expiry.date()}, {dte} DTE ({ref})"
+
+    if regime == MarketRegime.BEAR_DEFENSE:
+        return [head, "• 🟥 Bear signal — **close BOTH legs now** and rotate the shares to cash."]
+    if dte <= 0:
+        return [head, "• ⚠️ **Expired** — settle/close, then reopen a ~30-DTE collar at today's target strikes."]
+    if dte <= roll_dte:
+        return [head, f"• ⏰ **ROLL NOW** ({dte} DTE ≤ {roll_dte}) — close both legs and reopen a "
+                      "~30-DTE collar at today's target strikes."]
+    roll_date = (expiry - pd.Timedelta(days=roll_dte)).date()
+    return [head, f"• Hold — roll in ~{dte - roll_dte} days (≈ {roll_date}, at {roll_dte} DTE)."]
+
+
 def build_report(params: RegimeParams = RegimeParams(), with_chain: bool = True) -> str:
     df = _latest_frame(params)
     row = df.iloc[-1]
@@ -152,18 +208,26 @@ def build_report(params: RegimeParams = RegimeParams(), with_chain: bool = True)
         f"• Equity allocation: **{alloc}**",
     ]
 
+    position = load_position()
+    today = pd.Timestamp.now("UTC").normalize().tz_localize(None)
+    maint = position_maintenance_lines(position, today, st.regime)
+
     if st.regime == MarketRegime.BEAR_DEFENSE:
         lines += [
             "• Options: **NONE** — hold 100% cash/SGOV.",
             "--------------------------",
             "🎯 **ACTION**",
-            "• Close any open collar (both legs). Do **not** sell puts here.",
         ]
+        lines += maint if maint else ["• Close any open collar (both legs). Do **not** sell puts here."]
     else:
         lines += [
             "• Options: **COLLAR** (sell call + buy put on the TQQQ you hold).",
             "--------------------------",
-            "🎯 **TARGET STRUCTURE — COLLAR**",
+        ]
+        if maint:
+            lines += [*maint, "--------------------------"]
+        lines += [
+            "🎯 **TARGET STRUCTURE — COLLAR** (to open, or to roll into)",
             *_collar_structure_lines(S, float(row["IV"])),
         ]
         if with_chain:
