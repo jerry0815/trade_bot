@@ -83,6 +83,19 @@ def test_covered_call_respects_share_collateral():
     assert cc_trades == []
 
 
+def test_external_weight_overrides_sleeve():
+    # An external all-cash weight makes the sleeve compound at the cash yield only
+    # (ignoring the asset); an all-in weight tracks the asset. Both T+1.
+    data = _synthetic_data(n=500, seed=1)
+    cash = run_model(data, "trend", external_weight=pd.Series(0.0, index=data.index))
+    invested = run_model(data, "trend", external_weight=pd.Series(1.0, index=data.index))
+    end_cash = cash.equity_curve.iloc[-1] / cash.kpis["Initial Capital ($)"]
+    expected = (1 + 0.045 / 252) ** (len(data) - 1)     # cash compounding, day 0 no return
+    assert abs(end_cash - expected) / expected < 0.02
+    # On this rising synthetic path, being fully invested must beat sitting in cash.
+    assert invested.equity_curve.iloc[-1] > cash.equity_curve.iloc[-1] * 1.5
+
+
 def test_trend_sleeve_has_no_lookahead():
     # Today's return must be earned at YESTERDAY's target weight (T+1 / next-day
     # execution), not today's — using today's close to size today's return is a

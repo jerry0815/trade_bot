@@ -135,6 +135,13 @@ class OverlayConfig:
     collar_put_delta: float = 0.15    # long protective put (financed by the call)
     dte_collar: int = 30
 
+    # Optional externally-supplied daily equity weight (0..1), aligned by date —
+    # e.g. the production dual-signal + trailing-stop allocation from
+    # backtest/strat_backtest.py. When set it overrides the internal 3-state
+    # regime for the sleeve; option decisions treat weight>0 as "in position"
+    # (collar/overlay active) and 0 as cash (overlay closed). Non-taxable run only.
+    external_weight: object = None  # pd.Series | None
+
     # -- taxable-account model -------------------------------------------- #
     # When taxable=True the simulator switches to a two-bucket (equity + cash)
     # book with real cost-basis tracking: it trades only on regime changes
@@ -451,6 +458,9 @@ class OptionsOverlayBacktester:
 
         options_on = cfg.model in ("static_cc", "dynamic", "hedge_only", "collar")
         force_full_equity = cfg.model == "buy_hold"
+        ext_w = None
+        if cfg.external_weight is not None:
+            ext_w = cfg.external_weight.reindex(df.index).ffill().fillna(0.0).to_numpy()
 
         for i in range(n):
             S = close[i]
@@ -463,19 +473,24 @@ class OptionsOverlayBacktester:
             #    position held from today's close into tomorrow — so today's return
             #    is earned at YESTERDAY's weight (T+1 / next-day execution). Applying
             #    today's weight to today's return would be a 1-day lookahead.
-            if force_full_equity:
+            if ext_w is not None:
+                w_eq = float(ext_w[i])
+                regime_state = None
+                regime = MarketRegime.BULL_EXPANSION if w_eq > 0 else MarketRegime.BEAR_DEFENSE
+            elif force_full_equity:
                 w_eq = 1.0
                 regime_state = None
+                regime = MarketRegime.BULL_EXPANSION
             else:
                 regime_state = classify_regime(
                     S, sma[i], atr[i], ivr[i], rsi[i], cfg.regime
                 )
                 w_eq = regime_state.target_equity_pct
+                regime = regime_state.regime
             sleeve_value *= (1.0 + w_eq_prev * ret[i] + (1.0 - w_eq_prev) * cash_daily)
             w_eq_prev = w_eq
 
             # 2. Age and reprice open positions, then apply exit rules.
-            regime = regime_state.regime if regime_state else MarketRegime.BULL_EXPANSION
             still_open: list[OptionPosition] = []
             for pos in open_positions:
                 if i > 0:
@@ -536,7 +551,7 @@ class OptionsOverlayBacktester:
                             else:
                                 debit_paid += net
                 else:  # dynamic
-                    action = regime_state.option_action
+                    action = regime_state.option_action if regime_state else OptionAction.IDLE
                     if action != OptionAction.IDLE and not any(
                         p.action == action for p in open_positions
                     ):

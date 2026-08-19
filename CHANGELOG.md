@@ -4,6 +4,27 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2026-08-18] — Feat: run the overlay on the production trend rule (collar transfers)
+
+Wires the production allocation into the overlay engine to answer whether the
+collar helps the rule the live bot actually runs (not just the overlay's simpler
+single-signal sleeve).
+
+- `OverlayConfig.external_weight`: an optional daily 0..1 equity-weight series that
+  overrides the internal 3-state regime; option decisions treat weight>0 as
+  in-position (overlay active), 0 as cash. Test `test_external_weight_overrides_sleeve`.
+- `options/production_sleeve.py`: `production_weight()` builds the production
+  allocation — `DualSignalAgreement` (^NDX+^GSPC dual-signal, SMA200 ± 2.5·ATR) plus
+  the 8%/60d ^GSPC trailing stop, reusing `DualSignalAgreement._apply_trailing_stop`
+  so the stop matches the live bot exactly.
+- **Finding (Table 12):** the production rule is stronger than the overlay's
+  single-signal sleeve (Calmar 0.52 vs 0.37), **and the collar still improves it** —
+  Sharpe 0.71→0.76, Calmar 0.52→0.61, max drawdown −60%→−42% (2008 −30%→−17%), for
+  ~5pp less CAGR. Covered calls still hurt (0.34). So the collar's benefit is not an
+  artifact of a weak baseline; it helps the rule `bot.py` runs. 69 tests green.
+
+---
+
 ## [2026-08-18] — Fix: T+1 execution in the overlay engine (remove lookahead)
 
 The options-overlay backtester sized each day's return with *that day's* close — a

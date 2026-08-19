@@ -17,7 +17,7 @@ A research overlay that layers an options structure on top of a simple leveraged
 
 **The collar is the best overlay — a modest tail-risk reducer, not a return engine.** Across every view (2018–2026, the full 1990–2026 reconstruction, and 26-year rolling windows) the collar has the best risk-adjusted return and the shallowest drawdowns, and is the only overlay that beats Buy & Hold over the long history. But the edge is small and comes entirely from the protective put cutting drawdown; covered calls are the *worst* overlay (they cap upside without protecting the tail). Two caveats matter as much as the ranking:
 
-1. **The trend sleeve here is a naive single-signal SMA200 — much weaker than the production `bot.py`** (dual-signal + trailing stop). Over the V-shaped 2018–2026 it even trails Buy & Hold; it only earns its keep over long windows with *sustained* bears. So this study shows "a collar helps a simple leveraged trend sleeve" — whether it helps the stronger production bot is **untested**.
+1. **The benefit transfers to the production rule.** Most tables below run over a *simpler* single-signal sleeve than the production `bot.py` (dual-signal + trailing stop). But re-running on the production allocation itself (Table 12) shows the collar still helps — so this is not an artifact of a weak baseline.
 2. **These are frictionless, single-path, reconstructed-data results.** Treat the ranking as a signal, not the absolute numbers.
 
 Calmar (2018–2026 / full 1990–2026):
@@ -66,12 +66,29 @@ Reconstructed TQQQ (from `^NDX`) + `^VXN` (`^VIX × 1.15` before 2001); options 
 
 **Vol robustness:** the collar's Calmar edge holds across the pricing-vol assumption (2018–2026, 2.0/2.5/3.0× VXN: 0.42–0.48, always above Trend's 0.28), because it is self-financing — call and put priced off the same vol, so their vol sensitivities cancel — and the put's protection is mechanical (strike-based).
 
+### Table 12: On the *production* trend rule (does it transfer?)
+
+*Same overlay, but the equity sleeve is driven by the production allocation —
+`DualSignalAgreement` (^NDX+^GSPC dual-signal on SMA200 ± 2.5·ATR) + an 8%/60d
+^GSPC trailing stop — fed in via `OverlayConfig.external_weight` (see
+`options/production_sleeve.py`), instead of the overlay's own single-signal sleeve.
+1990–2026.*
+
+| On production sleeve | CAGR | Max DD | Sharpe | Calmar | DD dot-com | DD 2008 |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Trend (no options) | 31.4% | -60.5% | 0.71 | 0.52 | -61% | -30% |
+| + Covered Calls | 20.3% | -58.8% | 0.55 | 0.34 | -56% | -26% |
+| **+ Collar (P.15)** | 26.0% | **-42.5%** | **0.76** | **0.61** | -41% | **-17%** |
+| + Collar (P.20) | 24.1% | -41.1% | 0.75 | 0.59 | -36% | -15% |
+
+> **The production rule is stronger** than the overlay's single-signal sleeve (Calmar 0.52 vs 0.37), **and the collar still improves it** — Sharpe 0.71 → 0.76, Calmar 0.52 → 0.61, max drawdown −60% → −42% (2008 −30% → −17%), giving up ~5pp CAGR. Covered calls still *hurt* (0.34). So the collar's benefit is not an artifact of a weak baseline; it helps the rule the live bot actually runs.
+
 ---
 
 ## Caveats
 
 - **Strategy-comparison signal, not tradeable P&L, and not investment advice.** No real option chain; options are cash-settled at intrinsic, priced at `^VXN × 2.5` with a fixed 1.2× put skew.
-- **The trend sleeve is a simple single-signal SMA200, weaker than the production bot** (dual-signal + trailing stop). The collar's demonstrated benefit is over *this* sleeve, not `bot.py`.
+- **Most tables use a simple single-signal SMA200 sleeve**, weaker than the production bot (dual-signal + trailing stop). Table 12 confirms the collar also improves the production allocation, but the overlay engine still does not implement the bot's full logic (defensive rotation, next-day-open fills), so treat Table 12 as indicative, not the bot's exact P&L.
 - **Frictions unmodeled:** bid/ask, commissions on ~740+ option trades/window, slippage, early assignment. Ignore absolute dollar levels.
 - **Pre-2010 data is reconstructed** (validated at ~0.999 daily correlation); the collar's edge is largest when crashes actually occur (1990–2026 had four).
 - **Taxable accounts erase much of the edge** — short-term rates; use a tax-advantaged account. See [Tax Treatment](tax-treatment.md).
