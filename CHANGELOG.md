@@ -4,6 +4,25 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2026-08-19] — Docs: research retrospective; remove the options live monitor
+
+- **Added** `docs/research-retrospective-2026-08.md` — a consolidated record of the
+  options-overlay and trend-optimization research: what was tried (covered calls,
+  two-sided engine, hedge, collar, put-only; EMA and volatility-targeted sizing),
+  the two backtesting bugs found (sleeve lookahead, strike-pricing vol mismatch),
+  the uniformly negative/neutral results, and the lessons. Bottom line: nothing beat
+  the bare production trend rule; the strategy is near its practical optimum and
+  leverage is the only structural drawdown dial.
+- **Removed the options live bot.** Since the overlay is not worth executing, deleted
+  `options/live_monitor.py`, `.github/workflows/options_monitor.yaml` (Collar Overlay
+  Monitor), `options/collar_position.example.json`, and `tests/test_live_monitor.py`.
+  The `options/` research engine is retained as a documented negative finding.
+  `options/README.md`, README, and the strategy docs updated. 66 tests green.
+  (To fully stop the live workflow, push to `main` and delete the
+  `OPTIONS_DISCORD_WEBHOOK` repo secret.)
+
+---
+
 ## [2026-08-18] — Fix: options-overlay strike-pricing bug → negative result (overlay dropped)
 
 Fixes the second of two backtesting bugs and reverses the options-overlay
