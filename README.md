@@ -23,9 +23,30 @@ flowchart LR
 
 The **recommended action** is "in the market" only when both indices agree bullish **and** the trailing stop has not fired. The daily report prints this action twice — once for a **tax-advantaged account** (with the trailing stop) and once for a **taxable account** (dual-signal only, *without* the stop), because the stop's extra turnover is a net-negative return trade after tax (see [Tax Treatment](docs/strategies/tax-treatment.md)).
 
-### Experimental — Options Overlay (Collar)
+### Explored and set aside (negative results)
 
-A separate, self-contained [`options/`](options/) package tested whether an options structure (covered call, collar, protective put, two-sided premium engine) could complement the leveraged (3× TQQQ) trend sleeve. **Negative result: none of them beat running the trend rule bare** — on the single-signal sleeve *or* the production dual-signal + trailing-stop allocation, at any strike, over 1990–2026 (Calmar: bare Trend 0.35–0.47 vs every overlay ≤ 0.18; the collar is net-negative). Earlier drafts claimed a collar "won," but that was a pricing artifact: two backtesting bugs (a 1-day sleeve lookahead and a strike-selection-vs-pricing vol mismatch) inflated the result; both are now fixed. The overlay is **dropped as an execution candidate**. Kept as a documented negative finding. See [Options Overlay](docs/strategies/options-overlay.md) and the [research retrospective](docs/research-retrospective-2026-08.md) (which also covers the trend-rule optimization attempts — EMA and volatility-targeting, both neutral).
+Several ideas for improving the strategy were tested and **none beat the production
+trend rule** — recorded here (and elaborated in the
+[research retrospective](docs/research-retrospective-2026-08.md)) so they aren't
+re-explored:
+
+- **Options overlay** — a self-contained [`options/`](options/) package tested a
+  covered call, a two-sided premium engine, a protective-put hedge, a collar, and a
+  put-only structure on the 3× TQQQ sleeve. None beat the bare trend rule at any
+  strike, on the single-signal *or* production allocation (Calmar: bare Trend
+  0.35–0.47 vs every overlay ≤ 0.18; the collar is net-negative). Earlier "collar
+  wins" drafts were a pricing artifact from two backtesting bugs (a 1-day sleeve
+  lookahead and a strike-selection-vs-pricing vol mismatch), now fixed. Dropped as an
+  execution candidate; kept as a documented negative finding. See
+  [Options Overlay](docs/strategies/options-overlay.md).
+- **EMA 50/200 signal** (vs SMA 200 in the dual-signal rule) — ~neutral in practice.
+- **Volatility-targeted position sizing** — ~neutral (Sharpe unchanged across both
+  the 1990–2026 and 2010+ eras); it is redundant with a trend rule that already
+  rotates to cash in high-volatility (bear) regimes.
+
+**Takeaway:** the trend strategy is near its practical optimum. The only lever that
+meaningfully changes its deep (−50% to −65%) worst-case drawdowns is **leverage**
+(2× roughly halves the worst case for a modest return give-up), not a smarter signal.
 
 ---
 
