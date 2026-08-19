@@ -4,6 +4,34 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2026-08-18] — Fix: options-overlay strike-pricing bug → negative result (overlay dropped)
+
+Fixes the second of two backtesting bugs and reverses the options-overlay
+conclusion to negative.
+
+### Fixed: strike selection at the pricing vol (`overlay_backtest.py`)
+- Every position builder chose its strike at the *base* vol but priced/marked the
+  leg at the *skew-adjusted* vol. For a bought option that is a free lunch — the
+  "15Δ" put was struck closer to spot (more protective) *and* marked at inflated
+  vol. The tell: raising the put skew (making puts *more expensive*) *improved* a
+  put-*buying* strategy. Each strike is now selected at the same skew-adjusted vol
+  it is priced at. Regression test `test_option_strike_selected_at_its_pricing_vol`.
+
+### Conclusion reversed: no overlay beats the bare trend rule
+- Corrected, over 1990–2026 on both the single-signal and production (dual-signal +
+  trailing-stop) sleeves, at every strike: Calmar of bare Trend (0.35 / 0.47)
+  exceeds every overlay — covered calls 0.16–0.18, put-only 0.06–0.14, **collar
+  net-negative (~−0.02, with drawdowns deeper than doing nothing)**. Same ordering
+  in the 2018–2026 benchmark.
+- The earlier "collar wins" write-ups (this session, all local) were a pricing
+  artifact from this bug plus the T+1 lookahead fixed earlier. **The options overlay
+  is dropped as an execution candidate**; kept as a documented negative finding.
+- Strategy doc, extended doc, benchmark caveat, README, and `options/README.md`
+  rewritten to the negative conclusion. Live-chain snapshot validated the core
+  pricing (real ATM TQQQ IV ≈ 2.53× VXN vs model 2.50×). 72 tests green.
+
+---
+
 ## [2026-08-18] — Feat: protective-put model; optimize the overlay (put-only vs collar)
 
 Since covered calls alone hurt, the natural optimization is to drop the collar's

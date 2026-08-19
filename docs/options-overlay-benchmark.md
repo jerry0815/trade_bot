@@ -5,24 +5,24 @@ Initial capital: $10,000. TQQQ actual prices; ^VXN as IV proxy.
 | Metric | Model 1 — Buy & Hold TQQQ | Model 2 — Trend (SMA+ATR, no options) | Model 3 — Static Covered Calls | Model 4 — Dynamic Two-Sided Engine |
 | --- | --- | --- | --- | --- |
 | Initial Capital ($) | $10,000 | $10,000 | $10,000 | $10,000 |
-| Ending Portfolio Value ($) | $126,369 | $42,420 | $41,519 | $44,147 |
-| CAGR (%) | 34.25% | 18.27% | 17.97% | 18.82% |
-| Max Drawdown (MDD %) | -81.75% | -64.56% | -63.24% | -77.59% |
-| Max Drawdown Duration (Days) | 1,117 | 599 | 600 | 1,780 |
-| Sharpe Ratio (Rf=4.5%) | 0.71 | 0.50 | 0.50 | 0.52 |
-| Sortino Ratio | 0.93 | 0.56 | 0.53 | 0.53 |
-| Calmar Ratio (CAGR / MDD) | 0.42 | 0.28 | 0.28 | 0.24 |
-| Total Option Premium Collected ($) | $0 | $0 | $74,951 | $56,172 |
-| Total Option Debit Paid ($) | $0 | $0 | $0 | $14,935 |
-| Total Option P&L ($) | $0 | $0 | $-3,372 | $5,998 |
-| Option Win Rate (%) | n/a | n/a | 63.03% | 44.51% |
-| Total Option Trades | 0 | 0 | 284 | 182 |
+| Ending Portfolio Value ($) | $126,369 | $42,420 | $23,871 | $75,176 |
+| CAGR (%) | 34.25% | 18.27% | 10.63% | 26.39% |
+| Max Drawdown (MDD %) | -81.75% | -64.56% | -64.06% | -70.59% |
+| Max Drawdown Duration (Days) | 1,117 | 599 | 1,272 | 618 |
+| Sharpe Ratio (Rf=4.5%) | 0.71 | 0.50 | 0.35 | 0.64 |
+| Sortino Ratio | 0.93 | 0.56 | 0.36 | 0.67 |
+| Calmar Ratio (CAGR / MDD) | 0.42 | 0.28 | 0.17 | 0.37 |
+| Total Option Premium Collected ($) | $0 | $0 | $45,679 | $80,562 |
+| Total Option Debit Paid ($) | $0 | $0 | $0 | $28,814 |
+| Total Option P&L ($) | $0 | $0 | $-10,145 | $13,463 |
+| Option Win Rate (%) | n/a | n/a | 54.75% | 38.16% |
+| Total Option Trades | 0 | 0 | 263 | 207 |
 
 ## How to read this
 
 Models 2–4 share the identical 3-state equity sleeve, so any difference between them is attributable to the options overlay alone. Model 2 (no options) is the control.
 
-> ⚠️ **This is the 2018–2026 window, which had no prolonged bear — it is crash-light.** Covered calls lead here, but that lead does *not* survive a fast leveraged crash: over the full 1990–2026 history (which includes the fast April-2000 dot-com crash), covered calls fall *below* plain Trend and only the collar — with a real protective put — beats it. See `docs/options-overlay-extended-2001.md` and `docs/strategies/options-overlay.md` for the full-history result.
+> ⚠️ **Negative result.** After fixing two backtesting bugs (a 1-day sleeve lookahead and a strike-selection-vs-pricing vol mismatch), **no options overlay beats the bare Trend model** — here or over the full 1990–2026 history, on the single-signal or the production sleeve, at any strike. The options models below (covered calls, dynamic) trail Trend; the collar (not shown) is net-negative. Earlier 'collar wins' write-ups were a pricing artifact. See `docs/strategies/options-overlay.md`.
 
 Realized option P&L is settled into the compounding book (a covered-call loss reduces the capital that keeps compounding, exactly as in a real account), so returns and drawdowns are internally self-consistent even when cumulative option P&L is large relative to the book.
 

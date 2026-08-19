@@ -274,11 +274,18 @@ class OptionsOverlayBacktester:
         rp = cfg.regime
         r = cfg.risk_free
 
+        # Select each strike at the SAME skew-adjusted vol the leg is priced/marked
+        # at (an OTM option's delta is defined at its own skewed IV). Selecting at
+        # the base vol but pricing at the skewed vol is a lookahead-like free lunch —
+        # it hands a bought option protection+value its delta never paid for.
+        sig_call = sigma_base * CALL_SKEW_MULT
+        sig_put = sigma_base * PUT_SKEW_MULT
+
         if action == OptionAction.SELL_COVERED_CALL:
             dte = cfg.dte_covered_call
             delta = rp.cc_delta
             T = dte / 365.0
-            K, g = GreeksEngine.get_strike_for_delta(S, T, r, sigma_base, delta, "call")
+            K, g = GreeksEngine.get_strike_for_delta(S, T, r, sig_call, delta, "call")
             shares = (nav * w_eq) / S
             contracts = sizer.covered_call_contracts(shares)
             if contracts < 1:
@@ -291,7 +298,7 @@ class OptionsOverlayBacktester:
             dte = cfg.dte_csp
             delta = rp.csp_delta
             T = dte / 365.0
-            K, g = GreeksEngine.get_strike_for_delta(S, T, r, sigma_base, delta, "put")
+            K, g = GreeksEngine.get_strike_for_delta(S, T, r, sig_put, delta, "put")
             cash = nav * (1.0 - w_eq) if w_eq < 1.0 else nav
             contracts = sizer.cash_secured_put_contracts(cash, K)
             if contracts < 1:
@@ -304,7 +311,7 @@ class OptionsOverlayBacktester:
             dte = cfg.dte_bull_put
             T = dte / 365.0
             spread = GreeksEngine.spread_strikes(
-                S, T, r, sigma_base, rp.bps_short_delta, rp.bps_long_delta, "put"
+                S, T, r, sig_put, rp.bps_short_delta, rp.bps_long_delta, "put"
             )
             width = spread["short_strike"] - spread["long_strike"]
             if width <= 0:
@@ -324,10 +331,10 @@ class OptionsOverlayBacktester:
             dte = cfg.dte_put_debit
             T = dte / 365.0
             long_K, long_g = GreeksEngine.get_strike_for_delta(
-                S, T, r, sigma_base, rp.debit_long_delta, "put"
+                S, T, r, sig_put, rp.debit_long_delta, "put"
             )
             short_K, short_g = GreeksEngine.get_strike_for_delta(
-                S, T, r, sigma_base, rp.debit_short_delta, "put"
+                S, T, r, sig_put, rp.debit_short_delta, "put"
             )
             net_debit = long_g["price"] - short_g["price"]
             if net_debit <= 0:
@@ -364,7 +371,7 @@ class OptionsOverlayBacktester:
         dte = cfg.dte_static_cc
         T = dte / 365.0
         K, g = GreeksEngine.get_strike_for_delta(
-            S, T, cfg.risk_free, sigma_base, cfg.static_cc_delta, "call"
+            S, T, cfg.risk_free, sigma_base * CALL_SKEW_MULT, cfg.static_cc_delta, "call"
         )
         shares = (nav * w_eq) / S
         contracts = sizer.covered_call_contracts(shares)
@@ -391,8 +398,8 @@ class OptionsOverlayBacktester:
         dte = cfg.dte_collar
         T = dte / 365.0
         r = cfg.risk_free
-        Kc, gc = GreeksEngine.get_strike_for_delta(S, T, r, sigma_base, cfg.collar_call_delta, "call")
-        Kp, gp = GreeksEngine.get_strike_for_delta(S, T, r, sigma_base, cfg.collar_put_delta, "put")
+        Kc, gc = GreeksEngine.get_strike_for_delta(S, T, r, sigma_base * CALL_SKEW_MULT, cfg.collar_call_delta, "call")
+        Kp, gp = GreeksEngine.get_strike_for_delta(S, T, r, sigma_base * PUT_SKEW_MULT, cfg.collar_put_delta, "put")
         shares = (nav * w_eq) / S
         contracts = sizer.covered_call_contracts(shares)
         if contracts < 1:
@@ -417,7 +424,7 @@ class OptionsOverlayBacktester:
         cfg = self.cfg
         dte = cfg.dte_collar
         T = dte / 365.0
-        Kp, gp = GreeksEngine.get_strike_for_delta(S, T, cfg.risk_free, sigma_base, cfg.collar_put_delta, "put")
+        Kp, gp = GreeksEngine.get_strike_for_delta(S, T, cfg.risk_free, sigma_base * PUT_SKEW_MULT, cfg.collar_put_delta, "put")
         shares = (nav * w_eq) / S
         contracts = sizer.covered_call_contracts(shares)
         if contracts < 1:

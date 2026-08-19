@@ -210,6 +210,24 @@ def test_collar_builds_short_call_plus_long_put():
     assert puts[0].strike < calls[0].strike               # put below, call above spot
 
 
+def test_option_strike_selected_at_its_pricing_vol():
+    # A leg's strike must be chosen at the SAME skew-adjusted vol it is priced at,
+    # so its delta computed at that vol matches the target. (Regression: the engine
+    # used to select strikes at the base vol while pricing at the skewed vol, which
+    # handed bought options value their delta never paid for.)
+    from options.overlay_backtest import PUT_SKEW_MULT
+    from options.greeks import GreeksEngine
+    cfg = OverlayConfig(model="protective_put", collar_put_delta=0.15)
+    bt = OptionsOverlayBacktester(cfg)
+    S, sb, T = 100.0, 0.60, cfg.dte_collar / 365.0
+    pos = bt._protective_put_position(S=S, sigma_base=sb, nav=1_000_000.0, w_eq=1.0,
+                                      date=pd.Timestamp("2020-01-01"))
+    K_skew, _ = GreeksEngine.get_strike_for_delta(S, T, cfg.risk_free, sb * PUT_SKEW_MULT, 0.15, "put")
+    K_base, _ = GreeksEngine.get_strike_for_delta(S, T, cfg.risk_free, sb, 0.15, "put")
+    assert abs(pos.legs[0].strike - K_skew) < 1e-6   # strike chosen at the skewed pricing vol
+    assert abs(K_skew - K_base) > 0.5                # which genuinely differs from base-vol selection
+
+
 def test_protective_put_is_one_long_put_no_call():
     cfg = OverlayConfig(model="protective_put")
     bt = OptionsOverlayBacktester(cfg)

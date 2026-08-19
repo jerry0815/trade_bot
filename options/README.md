@@ -68,25 +68,23 @@ Reported KPIs: ending value, CAGR, max drawdown + duration, Sharpe (Rf=4.5%),
 Sortino, Calmar, total premium collected, total debit paid, total option P&L,
 option win-rate, and option trade count.
 
-### Finding (T+1 execution, pricing vol = VXN × 2.5)
+### Finding — negative result (not adopted)
 
-Full results and tables live in
-[`docs/strategies/options-overlay.md`](../docs/strategies/options-overlay.md);
-the short version, over 1990–2026 and 26-year rolling windows:
+Full write-up: [`docs/strategies/options-overlay.md`](../docs/strategies/options-overlay.md).
+**No options overlay beats the bare trend rule.** Over 1990–2026, on the
+single-signal sleeve *and* the production dual-signal + trailing-stop allocation, at
+every strike, the Calmar of bare Trend (0.35 / 0.47) exceeds every overlay
+(covered calls 0.16–0.18; put-only 0.06–0.14; collar net-negative, ~−0.02). The
+overlays' drawdowns are *deeper* than doing nothing — a fairly-priced protective put
+bleeds premium faster than its crash payoffs recover.
 
-- **The collar (sell ~20Δ call + buy ~15Δ put) is the best overlay** — shallowest
-  drawdowns and best worst-case return, the only overlay that beats Buy & Hold over
-  the long history (rolling: worst-case DD −60% vs Trend −65%, worst-case CAGR 13.3%
-  vs 12.3%). Its edge is *mechanical drawdown protection* from the put, robust across
-  2.0–3.0× VXN.
-- **Covered calls are the *worst* overlay** — a premium cushion caps the upside but
-  cannot protect a fast leveraged crash (−65% dot-com DD, same as plain Trend).
-- **The two-sided Dynamic engine is worse still** — its short *put* structures add
-  left-tail risk (−85% dot-com DD). Sell the top; don't add to the bottom.
-- The edge is *modest* (realistic Calmar ~0.45 vs Trend ~0.37), and the trend sleeve
-  here is a naive single-signal SMA200 — weaker than the production `bot.py`, so the
-  result does not automatically transfer to it. Earlier drafts quoted ~4×-larger
-  numbers from a since-fixed lookahead bug.
+Earlier drafts claimed a collar "won." That was an artifact of two backtesting bugs,
+now fixed: (1) a **1-day sleeve lookahead** (sized today's return with today's close)
+that inflated trend-based CAGR ~4×, and (2) a **strike-selection-vs-pricing vol
+mismatch** — strikes were chosen at the base vol but priced/marked at the skewed vol,
+handing bought puts value their delta never paid for (the tell: raising the put skew
+*improved* a put-buying strategy). Each option strike is now selected at the same
+skew-adjusted vol it is priced at.
 
 ## Accounting assumptions
 

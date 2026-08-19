@@ -1,129 +1,45 @@
-# Options Overlay (Collar on the Trend Model)
+# Options Overlay (negative result — not adopted)
 
-[← Back to README](../../README.md) · Related: [Methodology](methodology.md) · [Core Trend Signal](core-trend-signal.md) · [Tax Treatment](tax-treatment.md)
+[← Back to README](../../README.md) · Related: [Methodology](methodology.md) · [Core Trend Signal](core-trend-signal.md)
 
-A research overlay that layers an options structure on top of a simple leveraged (3× Nasdaq / TQQQ) trend sleeve, asking: *which* option overlay best complements a trend-follower? It is a self-contained [`options/`](../../options/) package with its own event-driven backtester, **independent of the production `bot.py` recommendation**. After fixing the option-pricing model **and a 1-day lookahead in the equity sleeve** (see the note below), and comparing five structures across the vol assumption and every crash since 1990, the best overlay is a **collar** — sell a ~20Δ call and buy a ~15Δ put on the TQQQ held, monthly, in the bull/transition regimes. Full engine spec, guardrails, and accounting: [`options/README.md`](../../options/README.md).
-
-> ⚠️ **Absolute returns were corrected downward ~4×.** An earlier version of this
-> engine sized each day's return with *that day's* close (a 1-day lookahead), which
-> inflated every trend-based CAGR ~4× (e.g. Trend 88% → 22%). The engine now uses
-> **next-day (T+1) execution**, matching the production engine, and the numbers
-> below are the realistic ones. The *ranking* is unchanged; the *magnitudes* are far
-> smaller than earlier drafts stated.
+A research overlay that layered an options structure (covered call, collar, protective put, or a two-sided premium engine) on top of the leveraged (3× TQQQ) trend sleeve, in a self-contained [`options/`](../../options/) package. **Conclusion: none of them beat running the trend rule bare.** Two backtesting bugs made earlier drafts of this doc claim a collar "won"; once both are fixed, the overlay provides **no robust benefit** and most variants are net-destructive. It is **not** part of the production `bot.py` recommendation and should not be executed.
 
 ---
 
-## Final Decision
+## Bottom line
 
-**The collar is the best overlay — a modest tail-risk reducer, not a return engine.** Across every view (2018–2026, the full 1990–2026 reconstruction, and 26-year rolling windows) the collar has the best risk-adjusted return and the shallowest drawdowns, and is the only overlay that beats Buy & Hold over the long history. But the edge is small and comes entirely from the protective put cutting drawdown; covered calls are the *worst* overlay (they cap upside without protecting the tail). Two caveats matter as much as the ranking:
+Correctly priced, **no options overlay beats the bare trend rule at any strike, on either the simple single-signal sleeve or the production dual-signal + trailing-stop allocation.** Covered calls cap upside for too little; buying protection bleeds more premium than its crash payoffs recover; the collar combines both into a net loss.
 
-1. **The benefit transfers to the production rule.** Most tables below run over a *simpler* single-signal sleeve than the production `bot.py` (dual-signal + trailing stop). But re-running on the production allocation itself (Table 12) shows the collar still helps — so this is not an artifact of a weak baseline.
-2. **These are frictionless, single-path, reconstructed-data results.** Treat the ranking as a signal, not the absolute numbers.
-3. **A simpler, higher-return alternative exists but is less robust:** dropping the short call (put-only, Table 13) beats the collar at the central vol estimate and keeps the upside, but a plain long put is a bought-vol bet that underperforms plain Trend if puts price rich. The collar is the *robust* choice; put-only is the *higher-conviction* one.
+| 1990–2026, Calmar (CAGR/MaxDD) | Bare Trend | Covered Calls | Collar (P.15) | Put-only (P.15) |
+| :--- | ---: | ---: | ---: | ---: |
+| Single-signal sleeve | **0.35** | 0.16 | −0.02 | 0.06 |
+| Production sleeve (dual-signal + stop) | **0.47** | 0.18 | −0.01 | 0.14 |
 
-Calmar (2018–2026 / full 1990–2026):
-
-| Overlay | Calmar 2018–26 | Calmar 1990–26 | Verdict |
-| :--- | ---: | ---: | :--- |
-| **Collar** (sell ~20Δ call + buy ~15Δ put) | **0.43–0.46** | **0.44–0.45** | **Best overlay** — shallowest DD, best worst-case; vol-robust |
-| Trend (no options) | 0.28 | 0.37 | Baseline (weak single-signal) |
-| Covered calls (sell ~20Δ call) | 0.28 | 0.26 | Weakest — caps upside, no tail protection |
-| Two-sided dynamic engine | 0.24 | 0.28 | Rejected — short puts add tail risk |
-| Buy & Hold 3× | 0.42 | 0.18 | Great in V-shaped bulls, ruinous in sustained bears (~−100%) |
+Nothing improved at other strikes (0.20Δ / 0.30Δ were worse on both sleeves). The collar's max drawdown was *deeper* than doing nothing (−81% to −99% vs trend's −61%): the fairly-priced protective put grinds the book down with premium bleed faster than it recovers in crashes. **Verdict: dropped as an execution candidate.**
 
 ---
 
-## Backtest Results
+## Why earlier drafts were wrong
 
-Reconstructed TQQQ (from `^NDX`) + `^VXN` (`^VIX × 1.15` before 2001); options priced at `^VXN × 2.5`; **next-day (T+1) execution**; realized option P&L compounds into the book. Ignore the absolute dollar levels — the drawdowns, Sharpe/Calmar, and ranking are the signal. See [`options/README.md`](../../options/README.md).
+This overlay looked good until two backtesting bugs were found and fixed:
 
-### Table 10: Single-path history, 1990-06 → 2026-08
+1. **1-day lookahead in the equity sleeve.** The engine sized each day's return with *that day's* close (next-day execution avoids this). It inflated every trend-based CAGR ~4× (Trend 88% → 22%). Fixed to T+1.
+2. **Strike-selection vs pricing vol mismatch.** Each option's strike was chosen at the *base* vol but priced/marked at the *skewed* vol. For a bought put that's a free lunch — the "15Δ" put was actually struck closer to spot (more protective) *and* marked at inflated vol. The tell: making puts **more expensive** (raising the put skew) *improved* a put-*buying* strategy — impossible if the model were consistent. Fixed so each strike is selected at the same skew-adjusted vol it is priced at.
 
-*$10,000 lump sum. Models 2–6 share the identical 3-state equity sleeve, so any difference is the overlay alone. `DD 1990 / dot-com / 2008` are drawdowns within those crash windows (dot-com from the March-2000 peak). Generated by `options/reconstruct_tqqq.py`.*
+The collar's apparent edge (a headline Calmar of ~0.6, and inflated drafts as high as ~4) came almost entirely from bug #2. With genuine 15Δ puts priced fairly, that edge is gone.
 
-| Model | CAGR | Max DD | Sharpe | Calmar | DD 1990 | DD dot-com | DD 2008 |
-| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Buy & Hold TQQQ | 17.9% | **~-100%** | 0.55 | 0.18 | -72% | -100% | -95% |
-| Trend (no options) | 24.5% | -66.7% | 0.61 | 0.37 | -32% | -65% | -49% |
-| Covered Calls | 17.0% | -64.5% | 0.48 | 0.26 | -28% | -65% | -44% |
-| Two-Sided Dynamic | 23.5% | -84.9% | 0.59 | 0.28 | -33% | -85% | -52% |
-| **Collar (P.15)** | 20.4% | -45.9% | **0.62** | **0.45** | -24% | -42% | -34% |
-| **Collar (P.20)** | 18.9% | -43.3% | 0.60 | 0.44 | -24% | -37% | -33% |
+## What still holds
 
-> Only the collar's protective put contains the fast April-2000 dot-com crash (−42% vs everyone else's −65% to −100%) and 2008 (−34% vs −49%). Covered calls draw down −65% right alongside plain Trend — a premium cushion can't protect a crash that size. Trend beats Buy & Hold here (0.37 vs 0.18) *because* this window includes the sustained dot-com/2008 bears the trend rule rotates out of.
+- **Trend-following is the load-bearing layer**, and the production dual-signal + trailing-stop rule is genuinely stronger than a naive single-signal SMA200 (Calmar 0.47 vs 0.35 over 1990–2026). That result is unaffected by the option bugs and stands.
+- Covered calls hurt a leveraged trend-follower (they were the worst overlay in every consistent run) — you're short exactly the fat-right-tail convexity that makes the strategy work.
 
-### Table 11: 26-year rolling windows (the robust view)
+## Caveats on the negative result
 
-*41 quarterly-stepped 26-year windows, starts 1990-06 → 2000-06 — the same rolling method as the rest of the repo (see [Methodology](methodology.md)), so these are directly comparable. `Worst DD` = deepest peak-to-trough across windows; `Worst DDvInit` = deepest dip below the initial $10k. Generated by `options/rolling_benchmark.py`.*
-
-| Model | Avg CAGR | Med CAGR | Worst CAGR | Worst DD | Worst DDvInit |
-| :--- | ---: | ---: | ---: | ---: | ---: |
-| Buy & Hold TQQQ | 6.0% | 7.4% | -6.0% | -100.0% | -100.0% |
-| Trend (no options) | 21.4% | 22.0% | 12.3% | -65.4% | -51.5% |
-| Covered Calls | 16.4% | 16.7% | 12.5% | -64.0% | -51.5% |
-| **Collar (P.15)** | 20.5% | 20.9% | **13.3%** | **-60.2%** | -51.5% |
-
-> On the robust rolling view the collar gives up ~1pp of average return vs plain Trend (20.5% vs 21.4%) to buy the **best worst-case return** (13.3% vs 12.3%) and the **shallowest worst drawdown** (−60% vs −65%). Covered calls are clearly worst (16.4% avg). These are realistic, in the same ~20% range as the production dual-signal rolling tables — a check that the T+1 fix landed. Note every leveraged strategy still carries a −60%+ worst-case drawdown; the collar softens it, it does not remove it.
-
-**Vol robustness:** the collar's Calmar edge holds across the pricing-vol assumption (2018–2026, 2.0/2.5/3.0× VXN: 0.42–0.48, always above Trend's 0.28), because it is self-financing — call and put priced off the same vol, so their vol sensitivities cancel — and the put's protection is mechanical (strike-based).
-
-### Table 12: On the *production* trend rule (does it transfer?)
-
-*Same overlay, but the equity sleeve is driven by the production allocation —
-`DualSignalAgreement` (^NDX+^GSPC dual-signal on SMA200 ± 2.5·ATR) + an 8%/60d
-^GSPC trailing stop — fed in via `OverlayConfig.external_weight` (see
-`options/production_sleeve.py`), instead of the overlay's own single-signal sleeve.
-1990–2026.*
-
-| On production sleeve | CAGR | Max DD | Sharpe | Calmar | DD dot-com | DD 2008 |
-| :--- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Trend (no options) | 31.4% | -60.5% | 0.71 | 0.52 | -61% | -30% |
-| + Covered Calls | 20.3% | -58.8% | 0.55 | 0.34 | -56% | -26% |
-| **+ Collar (P.15)** | 26.0% | **-42.5%** | **0.76** | **0.61** | -41% | **-17%** |
-| + Collar (P.20) | 24.1% | -41.1% | 0.75 | 0.59 | -36% | -15% |
-
-> **The production rule is stronger** than the overlay's single-signal sleeve (Calmar 0.52 vs 0.37), **and the collar still improves it** — Sharpe 0.71 → 0.76, Calmar 0.52 → 0.61, max drawdown −60% → −42% (2008 −30% → −17%), giving up ~5pp CAGR. Covered calls still *hurt* (0.34). So the collar's benefit is not an artifact of a weak baseline; it helps the rule the live bot actually runs.
-
-### Table 13: Optimizing the overlay — put-only vs the collar
-
-*On the production sleeve, 1990–2026. The covered-call leg is pure drag (covered
-calls alone hurt), so the natural optimization is to drop it and keep only the
-protective put (`model="protective_put"`). Vol columns are pricing vol = 2.0/2.5/3.0×
-VXN.*
-
-| Structure | CAGR | Max DD | Sharpe | Calmar @2.5× | Calmar @2.0× | Calmar @3.0× |
-| :--- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Trend (no options) | 29.1% | -61.4% | 0.67 | 0.47 | 0.47 | 0.47 |
-| Collar (P.15) | 24.8% | -41.5% | 0.73 | 0.60 | 0.52 | **0.62** |
-| **Put-only (P.15)** | **33.7%** | -51.9% | **0.83** | **0.65** | **0.90** | **0.46** |
-
-> **Put-only wins at the central vol estimate and keeps the upside** (drop the
-> short call → CAGR 34% vs the collar's 25%, Sharpe 0.83 vs 0.73, one leg instead of
-> two). **But it is *fragile*:** a plain long put is a pure bought-vol bet, so it is
-> spectacular when puts are cheap (Calmar 0.90 at 2.0×) and *collapses below plain
-> Trend* when they are rich (0.46 at 3.0×). The **collar is vol-robust** (0.52–0.62
-> across the whole range) because it is self-financing — the call premium pays for
-> the put, so their vol sensitivities cancel. Real TQQQ puts carry skew and often
-> price toward the rich end, so **put-only only makes sense with conviction that
-> puts are fairly priced**; otherwise the collar is the safer structure. Either way
-> the overlay's improvement over the bare trend rule is *modest* (~0.1–0.15 Calmar)
-> and monthly-cadence-dependent — quarterly rolling to cut effort drops it back to
-> ~Trend.
-
----
-
-## Caveats
-
-- **Strategy-comparison signal, not tradeable P&L, and not investment advice.** No real option chain; options are cash-settled at intrinsic, priced at `^VXN × 2.5` with a fixed 1.2× put skew.
-- **Most tables use a simple single-signal SMA200 sleeve**, weaker than the production bot (dual-signal + trailing stop). Table 12 confirms the collar also improves the production allocation, but the overlay engine still does not implement the bot's full logic (defensive rotation, next-day-open fills), so treat Table 12 as indicative, not the bot's exact P&L.
-- **Frictions unmodeled:** bid/ask, commissions on ~740+ option trades/window, slippage, early assignment. Ignore absolute dollar levels.
-- **Pre-2010 data is reconstructed** (validated at ~0.999 daily correlation); the collar's edge is largest when crashes actually occur (1990–2026 had four).
-- **Taxable accounts erase much of the edge** — short-term rates; use a tax-advantaged account. See [Tax Treatment](tax-treatment.md).
-
----
+- These are frictionless, single-path, reconstructed-data results; the *magnitudes* are approximate. But the *ranking* — every overlay below bare trend — is consistent across sleeves, strikes, and crash windows, and the sign is robust.
+- A live-chain snapshot (2026) validated the core pricing: real ATM TQQQ IV ≈ 2.53× VXN vs the model's 2.50×; real ~15Δ put ≈ 3.31× VXN (the model's 3.0× is if anything slightly generous to the put buyer, so correct pricing makes the overlay *worse*, not better).
 
 ## Further reading
 
-- [Options overlay benchmark (2018–2026)](../options-overlay-benchmark.md) — the primary 4-model table + accounting.
-- [Extended reconstruction backtest (1990–2026)](../options-overlay-extended-2001.md) — four-bear stress test + reconstruction validation.
-- [`options/README.md`](../../options/README.md) — full strategy matrix, guardrails, accounting, and how to run it.
+- [Options overlay benchmark (2018–2026)](../options-overlay-benchmark.md) — corrected 4-model table.
+- [Extended reconstruction backtest (1990–2026)](../options-overlay-extended-2001.md) — the four-bear stress test behind the numbers above.
+- [`options/README.md`](../../options/README.md) — engine, models, and how to reproduce.
