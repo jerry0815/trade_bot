@@ -410,6 +410,31 @@ class OptionsOverlayBacktester:
         pos._value_now = pos.value_entry
         return pos
 
+    def _protective_put_position(self, S, sigma_base, nav, w_eq, date) -> OptionPosition | None:
+        """Model 7: long protective put only (a collar minus the short call). Keeps
+        the full upside — no cap — at the cost of paying the put premium outright,
+        rather than financing it with a call. Rolled like the collar."""
+        cfg = self.cfg
+        dte = cfg.dte_collar
+        T = dte / 365.0
+        Kp, gp = GreeksEngine.get_strike_for_delta(S, T, cfg.risk_free, sigma_base, cfg.collar_put_delta, "put")
+        shares = (nav * w_eq) / S
+        contracts = sizer.covered_call_contracts(shares)
+        if contracts < 1:
+            return None
+        pos = OptionPosition(
+            action=OptionAction.BUY_PUT_DEBIT_SPREAD,  # long-put structure (labeling only)
+            contracts=contracts,
+            entry_date=date,
+            entry_dte=dte,
+            dte_remaining=dte,
+            legs=[Leg("put", Kp, +1, PUT_SKEW_MULT)],
+            value_entry=float(gp["price"]),            # debit paid
+            label=f"PP {cfg.collar_put_delta:.2f}Δ",
+        )
+        pos._value_now = pos.value_entry
+        return pos
+
     def _should_close_collar(self, pos: OptionPosition, regime: MarketRegime) -> str | None:
         """Roll near expiry; hold the put through the transition crash; drop once
         the sleeve is fully in cash (bear)."""
@@ -456,7 +481,7 @@ class OptionsOverlayBacktester:
 
         nav_curve = np.empty(n)
 
-        options_on = cfg.model in ("static_cc", "dynamic", "hedge_only", "collar")
+        options_on = cfg.model in ("static_cc", "dynamic", "hedge_only", "collar", "protective_put")
         force_full_equity = cfg.model == "buy_hold"
         ext_w = None
         if cfg.external_weight is not None:
@@ -498,7 +523,7 @@ class OptionsOverlayBacktester:
                 self._reprice(pos, S, sigma_base if sigma_base > 0 else 0.01)
                 if cfg.model == "hedge_only":
                     reason = self._should_close_hedge(pos, regime)
-                elif cfg.model == "collar":
+                elif cfg.model in ("collar", "protective_put"):
                     reason = self._should_close_collar(pos, regime)
                 else:
                     reason = self._should_close(pos, regime, ivr[i])
@@ -539,10 +564,12 @@ class OptionsOverlayBacktester:
                         if pos is not None:
                             open_positions.append(pos)
                             debit_paid += pos.value_entry * 100 * pos.contracts
-                elif cfg.model == "collar":
+                elif cfg.model in ("collar", "protective_put"):
                     if regime in (MarketRegime.BULL_EXPANSION, MarketRegime.TRANSITION_BAND) \
                             and not open_positions:
-                        pos = self._collar_position(S, sigma_base, sleeve_value, w_eq, dates[i])
+                        pos = (self._collar_position if cfg.model == "collar"
+                               else self._protective_put_position)(
+                            S, sigma_base, sleeve_value, w_eq, dates[i])
                         if pos is not None:
                             open_positions.append(pos)
                             net = pos.value_entry * 100 * pos.contracts

@@ -210,6 +210,25 @@ def test_collar_builds_short_call_plus_long_put():
     assert puts[0].strike < calls[0].strike               # put below, call above spot
 
 
+def test_protective_put_is_one_long_put_no_call():
+    cfg = OverlayConfig(model="protective_put")
+    bt = OptionsOverlayBacktester(cfg)
+    pos = bt._protective_put_position(S=100.0, sigma_base=0.75, nav=1_000_000.0, w_eq=1.0,
+                                      date=pd.Timestamp("2020-01-01"))
+    assert pos is not None
+    assert len(pos.legs) == 1
+    assert pos.legs[0].option_type == "put" and pos.legs[0].direction == +1  # long put only
+    assert pos.legs[0].strike < 100.0        # protective put is below spot
+    assert pos.value_entry > 0               # a debit (premium paid), not a credit
+
+
+def test_protective_put_model_runs_and_trades():
+    data = _synthetic_data(n=1200, seed=2)
+    res = run_model(data, "protective_put")
+    assert res.kpis["Total Option Trades"] > 0
+    assert res.kpis["Ending Portfolio Value ($)"] > 0
+
+
 def test_collar_model_runs_and_trades():
     data = _synthetic_data(n=1200, seed=2)
     res = run_model(data, "collar")

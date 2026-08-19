@@ -4,6 +4,26 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2026-08-18] — Feat: protective-put model; optimize the overlay (put-only vs collar)
+
+Since covered calls alone hurt, the natural optimization is to drop the collar's
+short call and keep only the protective put.
+
+- Added `model="protective_put"` (Model 7): a long ~15Δ put only, rolled like the
+  collar. Tests `test_protective_put_is_one_long_put_no_call`,
+  `test_protective_put_model_runs_and_trades`. 71 tests green.
+- **Finding (Table 13, on the production sleeve, 1990–2026):** put-only beats the
+  collar at the central vol estimate — Calmar 0.65 vs 0.60, Sharpe 0.83 vs 0.73,
+  and it keeps the upside (CAGR 34% vs 25%) with one leg instead of two. **But it is
+  fragile:** a plain long put is a bought-vol bet — Calmar 0.90 at 2.0× VXN but 0.46
+  (below plain Trend's 0.47) at 3.0×. The collar is vol-robust (0.52–0.62 across the
+  range) because it self-finances. So put-only needs conviction that puts are fairly
+  priced; the collar is the safer structure. Either way the overlay's edge over the
+  bare trend rule is modest (~0.1–0.15 Calmar) and monthly-cadence-dependent
+  (quarterly rolling drops it back to ~Trend).
+
+---
+
 ## [2026-08-18] — Feat: run the overlay on the production trend rule (collar transfers)
 
 Wires the production allocation into the overlay engine to answer whether the

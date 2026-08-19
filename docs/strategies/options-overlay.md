@@ -19,6 +19,7 @@ A research overlay that layers an options structure on top of a simple leveraged
 
 1. **The benefit transfers to the production rule.** Most tables below run over a *simpler* single-signal sleeve than the production `bot.py` (dual-signal + trailing stop). But re-running on the production allocation itself (Table 12) shows the collar still helps — so this is not an artifact of a weak baseline.
 2. **These are frictionless, single-path, reconstructed-data results.** Treat the ranking as a signal, not the absolute numbers.
+3. **A simpler, higher-return alternative exists but is less robust:** dropping the short call (put-only, Table 13) beats the collar at the central vol estimate and keeps the upside, but a plain long put is a bought-vol bet that underperforms plain Trend if puts price rich. The collar is the *robust* choice; put-only is the *higher-conviction* one.
 
 Calmar (2018–2026 / full 1990–2026):
 
@@ -82,6 +83,32 @@ Reconstructed TQQQ (from `^NDX`) + `^VXN` (`^VIX × 1.15` before 2001); options 
 | + Collar (P.20) | 24.1% | -41.1% | 0.75 | 0.59 | -36% | -15% |
 
 > **The production rule is stronger** than the overlay's single-signal sleeve (Calmar 0.52 vs 0.37), **and the collar still improves it** — Sharpe 0.71 → 0.76, Calmar 0.52 → 0.61, max drawdown −60% → −42% (2008 −30% → −17%), giving up ~5pp CAGR. Covered calls still *hurt* (0.34). So the collar's benefit is not an artifact of a weak baseline; it helps the rule the live bot actually runs.
+
+### Table 13: Optimizing the overlay — put-only vs the collar
+
+*On the production sleeve, 1990–2026. The covered-call leg is pure drag (covered
+calls alone hurt), so the natural optimization is to drop it and keep only the
+protective put (`model="protective_put"`). Vol columns are pricing vol = 2.0/2.5/3.0×
+VXN.*
+
+| Structure | CAGR | Max DD | Sharpe | Calmar @2.5× | Calmar @2.0× | Calmar @3.0× |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Trend (no options) | 29.1% | -61.4% | 0.67 | 0.47 | 0.47 | 0.47 |
+| Collar (P.15) | 24.8% | -41.5% | 0.73 | 0.60 | 0.52 | **0.62** |
+| **Put-only (P.15)** | **33.7%** | -51.9% | **0.83** | **0.65** | **0.90** | **0.46** |
+
+> **Put-only wins at the central vol estimate and keeps the upside** (drop the
+> short call → CAGR 34% vs the collar's 25%, Sharpe 0.83 vs 0.73, one leg instead of
+> two). **But it is *fragile*:** a plain long put is a pure bought-vol bet, so it is
+> spectacular when puts are cheap (Calmar 0.90 at 2.0×) and *collapses below plain
+> Trend* when they are rich (0.46 at 3.0×). The **collar is vol-robust** (0.52–0.62
+> across the whole range) because it is self-financing — the call premium pays for
+> the put, so their vol sensitivities cancel. Real TQQQ puts carry skew and often
+> price toward the rich end, so **put-only only makes sense with conviction that
+> puts are fairly priced**; otherwise the collar is the safer structure. Either way
+> the overlay's improvement over the bare trend rule is *modest* (~0.1–0.15 Calmar)
+> and monthly-cadence-dependent — quarterly rolling to cut effort drops it back to
+> ~Trend.
 
 ---
 
