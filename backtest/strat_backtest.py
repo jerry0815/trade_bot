@@ -848,7 +848,7 @@ class Backtester:
     """The simulation engine handling money, drawdowns, and data ingestion."""
     def __init__(self, base_ticker="^NDX", start_date="1999-01-01", period_years=25,
                  leverage=3, expense_ratio=0.0095, initial_fund=10000, annual_dca=0,
-                 apply_tax=False, verbose=True, signal_ticker=None):
+                 monthly_dca=0, apply_tax=False, verbose=True, signal_ticker=None):
         self.base_ticker   = base_ticker
         # signal_ticker: ticker used to generate strategy signals (in_market).
         # If None or same as base_ticker, standard single-ticker mode.
@@ -863,6 +863,7 @@ class Backtester:
         self.expense_ratio = expense_ratio
         self.initial_fund  = initial_fund
         self.annual_dca    = annual_dca
+        self.monthly_dca   = monthly_dca
         self.apply_tax     = apply_tax
         self.verbose       = verbose
 
@@ -962,6 +963,10 @@ class Backtester:
         o2c_arr   = np.nan_to_num(df['Open2Close'].values.astype(float))
         ovn_arr   = np.nan_to_num(df['Overnight_Return'].values.astype(float))
         years_arr = dates.year
+        # Unique integer key per calendar month (…, 24000+1=Jan, +2=Feb, …),
+        # so a strictly increasing value marks the first trading day of a new
+        # month — the trigger for a monthly DCA injection.
+        month_key_arr = np.asarray(dates.year) * 12 + np.asarray(dates.month)
 
         # --- Vectorised transition masks ---
         prev_mkt     = np.empty(n, dtype=bool)
@@ -988,7 +993,8 @@ class Backtester:
         # --- Scalar loop: only handles running-value-dependent state ---
         portfolio_value = self.initial_fund
         total_principal = self.initial_fund
-        current_year    = int(years_arr[0])
+        current_year      = int(years_arr[0])
+        current_month_key = int(month_key_arr[0])
         peak_value      = self.initial_fund
         min_value       = self.initial_fund
         max_drawdown    = 0.0
@@ -1041,6 +1047,25 @@ class Backtester:
                 current_year    = int(years_arr[i])
                 total_principal += self.annual_dca
                 portfolio_value += self.annual_dca
+                # If we're mid-position, the fresh cash becomes part of this
+                # position's basis — otherwise it would be taxed as gain on the
+                # eventual exit. (No-op when in cash: basis is re-captured at the
+                # next entry, which already includes this cash.)
+                if entry_idx >= 0:
+                    cost_basis_val += self.annual_dca
+
+            # Monthly DCA: inject once per calendar month, on the first trading
+            # day of each new month. New cash joins portfolio_value, so it earns
+            # whatever the strategy is doing that day — the money-market rate
+            # while in cash, the leveraged position while in-market — exactly
+            # like the initial fund. First (partial) month gets no injection.
+            if self.monthly_dca > 0 and month_key_arr[i] > current_month_key:
+                current_month_key = int(month_key_arr[i])
+                total_principal  += self.monthly_dca
+                portfolio_value  += self.monthly_dca
+                # Mid-position contributions add to basis (see annual block).
+                if entry_idx >= 0:
+                    cost_basis_val += self.monthly_dca
 
             # Drawdown tracking
             if portfolio_value > peak_value: peak_value = portfolio_value
@@ -1080,10 +1105,15 @@ class Backtester:
 
     def _print_results(self, res):
         tax_str  = " | Tax-Aware (After-Tax TWR)" if self.apply_tax else ""
-        mode_str = f" | DCA: ${self.annual_dca:,.0f}/yr" if self.annual_dca > 0 else " | Lump Sum"
+        if self.monthly_dca > 0:
+            mode_str = f" | DCA: ${self.monthly_dca:,.0f}/mo"
+        elif self.annual_dca > 0:
+            mode_str = f" | DCA: ${self.annual_dca:,.0f}/yr"
+        else:
+            mode_str = " | Lump Sum"
         print(f"--- Running {res['strategy']}: {self.leverage}x {self.base_ticker}{mode_str}{tax_str} ---")
 
-        if self.annual_dca > 0:
+        if self.annual_dca > 0 or self.monthly_dca > 0:
             print(f"Total Invested: ${res['total_invested']:,.2f}")
             print(f"Total ROI:      {res['total_roi']:,.2f}%")
 
@@ -1127,8 +1157,8 @@ class RollingBacktester:
     """Orchestrates multiple backtests across a rolling window of start dates."""
     def __init__(self, start_dates, base_ticker="^NDX", period_years=25,
                  leverage=3, expense_ratio=0.0095, initial_fund=10000, annual_dca=0,
-                 apply_tax=False, metric_key="strategy_twr", metric_label="TWR",
-                 signal_ticker=None):
+                 monthly_dca=0, apply_tax=False, metric_key="strategy_twr",
+                 metric_label="TWR", signal_ticker=None):
         self.start_dates   = start_dates
         self.base_ticker   = base_ticker
         self.signal_ticker = signal_ticker if signal_ticker else base_ticker
@@ -1137,6 +1167,7 @@ class RollingBacktester:
         self.expense_ratio = expense_ratio
         self.initial_fund  = initial_fund
         self.annual_dca    = annual_dca
+        self.monthly_dca   = monthly_dca
         self.apply_tax     = apply_tax
         self.metric_key    = metric_key
         self.metric_label  = metric_label
@@ -1169,6 +1200,7 @@ class RollingBacktester:
                 expense_ratio = self.expense_ratio,
                 initial_fund  = self.initial_fund,
                 annual_dca    = self.annual_dca,
+                monthly_dca   = self.monthly_dca,
                 apply_tax     = self.apply_tax,
                 verbose       = False,
             )
@@ -1181,6 +1213,12 @@ class RollingBacktester:
                 row_data[f"{strat.name} Max DD (%)"]          = res["max_drawdown"]
                 row_data[f"{strat.name} Max DD vs Initial (%)"] = res.get("max_dd_vs_initial", 0.0)
                 row_data[f"{strat.name} Total Trades"]        = res.get("total_trades", 0)
+                # Money-weighted dollar outcomes — the metrics DCA actually
+                # moves (TWR above is cash-flow-invariant). Present for every
+                # run; only meaningful to read when contributing.
+                row_data[f"{strat.name} Final Value"]    = res.get("final_value", 0.0)
+                row_data[f"{strat.name} Total Invested"] = res.get("total_invested", 0.0)
+                row_data[f"{strat.name} Total ROI (%)"]  = res.get("total_roi", 0.0)
             return row_data
 
         workers = min(8, len(self.start_dates))
@@ -1198,6 +1236,7 @@ def run_experiment_suite(
     start_dates,
     period_years=26,
     annual_dca=0,
+    monthly_dca=0,
     base_ticker="^NDX",
     signal_ticker=None,
     initial_fund=10000,
@@ -1225,6 +1264,7 @@ def run_experiment_suite(
             expense_ratio=config['expense'],
             initial_fund=initial_fund,
             annual_dca=annual_dca,
+            monthly_dca=monthly_dca,
             apply_tax=apply_tax
         )
 
