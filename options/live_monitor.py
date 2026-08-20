@@ -25,7 +25,7 @@ import pandas as pd
 
 from .greeks import GreeksEngine
 from .regime import MarketRegime, RegimeParams, classify_regime
-from .run_benchmark import _atr, _rsi
+from .run_benchmark import _atr, _rsi, _adx
 from .iv_loader import compute_iv_rank
 
 # Collar parameters (mirror OverlayConfig defaults for the winning model).
@@ -53,6 +53,7 @@ def _latest_frame(params: RegimeParams) -> pd.DataFrame:
     df["SMA"] = df["Close"].rolling(params.sma_period, min_periods=params.sma_period).mean()
     df["ATR"] = _atr(tqqq, params.atr_period)
     df["RSI"] = _rsi(df["Close"], params.rsi_period)
+    df["ADX"] = _adx(tqqq)
     iv = compute_iv_rank(vxn["Close"])
     df["IV"] = iv["IV"].reindex(df.index).ffill()
     df["IV_Rank"] = iv["IV_Rank"].reindex(df.index).ffill()
@@ -146,7 +147,7 @@ def build_report(params: RegimeParams = RegimeParams(), with_chain: bool = True)
         "--------------------------",
         f"📈 **TQQQ** {S:.2f} | SMA200 {row['SMA']:.2f} | ATR14 {row['ATR']:.2f}",
         f"• Regime bands: {st.lower_bound:.2f} — {st.upper_bound:.2f}",
-        f"• IV (^VXN): {row['IV']:.2f}  |  RSI14: {row['RSI']:.1f}",
+        f"• IV (^VXN): {row['IV']:.2f}  |  RSI14: {row['RSI']:.1f}  |  ADX14: {row.get('ADX', float('nan')):.1f}",
         "--------------------------",
         f"{regime_emoji} **REGIME: {st.regime.value}**",
         f"• Equity allocation: **{alloc}**",

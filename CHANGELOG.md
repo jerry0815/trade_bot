@@ -4,6 +4,35 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2026-08-20] — Feat: opt-in RSI/ADX entry filters for the options overlay
+
+Branch `claude/dynamic-options-overlay-tqqq-hlsp5c`. Adds confirmation gates
+applied **before opening a premium-selling structure** (covered call, CSP,
+bull-put spread, static CC). Premium sellers are short gamma, so a strong/fast
+trend runs through the short strike and turns theta income into a loss; these
+gates skip such opens.
+
+### Added
+- `OptionsOverlayBacktester._entry_allowed()` + `OverlayConfig` fields
+  (`use_entry_filters`, `premium_adx_max=40`, `premium_rsi_min=20`,
+  `cc_rsi_max=80`). Wired into both the standard and taxable run loops for the
+  `dynamic` and `static_cc` models. Protective structures (`hedge_only`,
+  `collar`, and the put *debit* hedge) are never filtered.
+- Wilder-14 **ADX** indicator (`run_benchmark._adx`), added to the benchmark and
+  live-monitor data frames; `live_monitor` now prints ADX14.
+- `Entry-Filter Blocks` KPI (count of opens the filters skipped).
+- `run_benchmark` flags: `--entry-filters` (enable across the suite) and
+  `--compare-filters` (filters OFF-vs-ON table for the dynamic model).
+- Tests: `tests/test_entry_filters.py` (11 cases). Full suite 73 green.
+
+### Notes
+- **Default OFF** — existing benchmark numbers are unchanged until enabled.
+- Whether the filters improve returns is an empirical question that must be
+  answered on the real 2018–2026 run (`--compare-filters`); on a synthetic random
+  path they only reduce activity, with no regime edge to exploit.
+
+---
+
 ## [2026-08-18] — Docs: options-overlay strategy doc (collar results)
 
 Adds `docs/strategies/options-overlay.md` in the per-strategy house style,

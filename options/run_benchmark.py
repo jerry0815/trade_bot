@@ -60,6 +60,27 @@ def _atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
     return tr.rolling(period, min_periods=period).mean()
 
 
+def _adx(df: pd.DataFrame, period: int = 14) -> pd.Series:
+    """Wilder's ADX (trend-strength, 0-100). Uses Wilder (EMA-style) smoothing."""
+    high, low, close = df["High"], df["Low"], df["Close"]
+    up = high.diff()
+    down = -low.diff()
+    plus_dm = up.where((up > down) & (up > 0), 0.0)
+    minus_dm = down.where((down > up) & (down > 0), 0.0)
+
+    prev_close = close.shift(1)
+    tr = pd.concat([
+        high - low, (high - prev_close).abs(), (low - prev_close).abs(),
+    ], axis=1).max(axis=1)
+
+    alpha = 1.0 / period  # Wilder smoothing
+    atr = tr.ewm(alpha=alpha, adjust=False).mean()
+    plus_di = 100 * plus_dm.ewm(alpha=alpha, adjust=False).mean() / atr.replace(0, np.nan)
+    minus_di = 100 * minus_dm.ewm(alpha=alpha, adjust=False).mean() / atr.replace(0, np.nan)
+    dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
+    return dx.ewm(alpha=alpha, adjust=False).mean()
+
+
 def prepare_overlay_data(
     start: str = "2018-01-01",
     end: str | None = None,
@@ -90,6 +111,7 @@ def prepare_overlay_data(
     df["SMA"] = df["Close"].rolling(sma_period, min_periods=sma_period).mean()
     df["ATR"] = _atr(tqqq)
     df["RSI"] = _rsi(df["Close"])
+    df["ADX"] = _adx(tqqq)
 
     iv = compute_iv_rank(vxn["Close"])
     df["IV"] = iv["IV"].reindex(df.index).ffill()
@@ -114,7 +136,7 @@ def _fmt(key: str, val) -> str:
         return f"{val:,.2f}"
     if "($)" in key:
         return f"${val:,.0f}"
-    if "Days" in key or "Trades" in key:
+    if "Days" in key or "Trades" in key or "Blocks" in key:
         return f"{int(val):,}"
     if "(%" in key or "%)" in key:
         return f"{val:,.2f}%"
@@ -131,12 +153,33 @@ def format_table(results: dict[str, BacktestResult]) -> str:
     return "\n".join("| " + " | ".join(r) + " |" for r in rows)
 
 
+def format_filter_comparison(data: pd.DataFrame, model: str = "dynamic", **cfg_kwargs) -> str:
+    """Side-by-side of one overlay model with entry filters OFF vs ON.
+
+    Directly answers "do the RSI/ADX confirmation gates improve this model?" —
+    Models 2–4 are unchanged; only the option-open gate differs between columns.
+    """
+    off = run_model(data, model, use_entry_filters=False, **cfg_kwargs)
+    on = run_model(data, model, use_entry_filters=True, **cfg_kwargs)
+    cols = {f"{model} — filters OFF": off, f"{model} — filters ON": on}
+    kpi_order = list(off.kpis.keys())
+    headers = ["Metric"] + list(cols.keys())
+    rows = [headers, ["---"] * len(headers)]
+    for kpi in kpi_order:
+        rows.append([kpi] + [_fmt(kpi, r.kpis.get(kpi, float("nan"))) for r in cols.values()])
+    return "\n".join("| " + " | ".join(r) + " |" for r in rows)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Run the 4-model options-overlay benchmark.")
     ap.add_argument("--start", default="2018-01-01")
     ap.add_argument("--end", default=None)
     ap.add_argument("--capital", type=float, default=10_000.0)
     ap.add_argument("--out", default=None, help="Write a Markdown report to this path.")
+    ap.add_argument("--entry-filters", action="store_true",
+                    help="Enable the RSI/ADX entry filters for the overlay models.")
+    ap.add_argument("--compare-filters", action="store_true",
+                    help="Print a filters OFF vs ON comparison for the dynamic model.")
     args = ap.parse_args(argv)
 
     print(f"Preparing data {args.start} .. {args.end or 'today'} ...")
@@ -144,7 +187,14 @@ def main(argv=None):
     print(f"  {len(data)} trading days, "
           f"{data.index[0].date()} .. {data.index[-1].date()}")
 
-    results = run_suite(data, initial_capital=args.capital)
+    if args.compare_filters:
+        table = format_filter_comparison(data, "dynamic", initial_capital=args.capital)
+        print("\n=== Entry filters: dynamic model OFF vs ON ===\n" + table + "\n")
+        if not args.out:
+            return
+
+    results = run_suite(data, initial_capital=args.capital,
+                        use_entry_filters=args.entry_filters)
     table = format_table(results)
     print("\n" + table + "\n")
 

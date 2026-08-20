@@ -36,6 +36,33 @@ regime**.
 * **Emergency linkage** — a bear signal buys-to-close all covered calls *before*
   the equity sleeve is liquidated (`_should_close` returns `BEAR_CC_LIQUIDATION`).
 
+## Entry filters (opt-in, `use_entry_filters=True`)
+
+Extra confirmation gates applied **before opening a premium-selling structure**
+(covered call, cash-secured put, bull-put spread, static CC). Premium sellers are
+short gamma — a strong, fast trend runs through the short strike and turns theta
+income into a loss — so these gates skip the open when the tape says "don't sell
+premium here". Protective structures (`hedge_only`, `collar`, and the bull put
+*debit* hedge) are never filtered.
+
+| Gate | Rule | Config | Rationale |
+|---|---|---|---|
+| ADX | skip premium sells when `ADX ≥ premium_adx_max` | `premium_adx_max=40` | strong trend runs over short strikes |
+| RSI floor | skip premium sells when `RSI ≤ premium_rsi_min` | `premium_rsi_min=20` | don't sell into a falling knife |
+| RSI ceiling | skip **covered calls** when `RSI ≥ cc_rsi_max` | `cc_rsi_max=80` | a blow-off run caps exactly the upside we want |
+
+Unknown (NaN) indicator values never block, so the ADX gate no-ops unless the data
+carries an `ADX` column (`run_benchmark`/`live_monitor` add a Wilder-14 `ADX`; a
+scale-invariant, always-present `RSI` drives the RSI gates). Blocked opens are
+reported as the `Entry-Filter Blocks` KPI.
+
+**Default OFF** so existing benchmark numbers are unchanged — turn on per model with
+`run_model(data, "dynamic", use_entry_filters=True)`, for the whole suite with
+`--entry-filters`, or measure the effect directly with `--compare-filters` (a
+filters OFF-vs-ON table for the dynamic model). Whether the filters *help* is an
+empirical question that must be answered on the real 2018–2026 run — on a synthetic
+random path they slightly reduce activity without a regime edge to exploit.
+
 ## Modules
 
 | File | Role |
@@ -119,6 +146,11 @@ pip install -r requirements.txt
 # 4-model benchmark (needs working yfinance egress; save a Markdown report):
 python -m options.run_benchmark --start 2018-01-01 --end 2026-08-17 \
     --out docs/options-overlay-benchmark.md
+
+# measure the RSI/ADX entry filters (dynamic model, filters OFF vs ON):
+python -m options.run_benchmark --start 2018-01-01 --end 2026-08-17 --compare-filters
+# ...or run the whole 4-model suite with filters enabled:
+python -m options.run_benchmark --entry-filters
 
 # refresh the IV-Rank history CSV:
 python -m options.iv_loader

@@ -108,6 +108,21 @@ class OverlayConfig:
 
     static_cc_delta: float = 0.20    # Model 3 fixed covered-call delta
 
+    # -- entry filters (opt-in) ------------------------------------------- #
+    # Extra confirmation gates applied *before opening a premium-selling*
+    # structure (covered call, cash-secured put, bull-put spread, static CC).
+    # Premium sellers are short gamma: a strong, fast trend runs through the
+    # short strike and turns theta income into a loss. These filters skip those
+    # opens; protective structures (hedge_only, collar) are never filtered.
+    # Default OFF so existing benchmark numbers are unchanged — enable with
+    # use_entry_filters=True (needs an "ADX" column for the ADX gate; the RSI
+    # gate works from the always-present "RSI" column).
+    use_entry_filters: bool = False
+    adx_period: int = 14
+    premium_adx_max: float = 40.0   # skip premium sells when ADX >= this (strong trend)
+    cc_rsi_max: float = 80.0        # skip covered calls when RSI >= this (blow-off run)
+    premium_rsi_min: float = 20.0   # skip premium sells when RSI <= this (falling knife)
+
     # ^VXN is the *1x* Nasdaq-100 vol index, but options here are on the *3x*
     # TQQQ, whose realized vol runs ~2.5x VXN (measured 2018-2026: median 2.51x,
     # mean 2.58x). Pricing off raw VXN underprices every option ~2.5x in vol
@@ -184,6 +199,35 @@ class OptionsOverlayBacktester:
             value += leg.direction * g["price"]
         pos._value_now = value
         return value
+
+    # -- entry filters ----------------------------------------------------- #
+    #: premium-selling (short-gamma) actions the filters apply to.
+    _PREMIUM_SELLERS = frozenset({
+        OptionAction.SELL_COVERED_CALL,
+        OptionAction.SELL_CASH_SECURED_PUT,
+        OptionAction.SELL_BULL_PUT_SPREAD,
+    })
+
+    def _entry_allowed(self, action: OptionAction, rsi: float, adx: float) -> tuple[bool, str]:
+        """Confirmation gate before opening a premium-selling structure.
+
+        Returns ``(allowed, reason)``. When ``use_entry_filters`` is off, always
+        allows. Only premium sellers are gated; unknown (NaN) indicator values
+        never block, so the ADX gate no-ops when no "ADX" column is supplied.
+        """
+        cfg = self.cfg
+        if not cfg.use_entry_filters or action not in self._PREMIUM_SELLERS:
+            return True, ""
+        # Strong, fast trend -> short strikes get run over.
+        if adx == adx and adx >= cfg.premium_adx_max:
+            return False, f"ADX {adx:.0f} >= {cfg.premium_adx_max:.0f}"
+        # Falling knife -> don't sell into a collapse (covers CSP/BPS too).
+        if rsi == rsi and rsi <= cfg.premium_rsi_min:
+            return False, f"RSI {rsi:.0f} <= {cfg.premium_rsi_min:.0f}"
+        # Blow-off momentum -> a covered call caps the very run we want.
+        if action == OptionAction.SELL_COVERED_CALL and rsi == rsi and rsi >= cfg.cc_rsi_max:
+            return False, f"RSI {rsi:.0f} >= {cfg.cc_rsi_max:.0f}"
+        return True, ""
 
     # -- hedge_only (Model 5) helpers ------------------------------------- #
     def _hedge_eligible(self, regime: MarketRegime, iv_rank: float) -> bool:
@@ -428,12 +472,15 @@ class OptionsOverlayBacktester:
         rsi = df["RSI"].values.astype(float)
         iv = df["IV"].values.astype(float)
         ivr = df["IV_Rank"].values.astype(float)
+        adx = (df["ADX"].values.astype(float) if "ADX" in df.columns
+               else np.full(n, np.nan))
         dates = df.index
 
         ret = np.empty(n)
         ret[0] = 0.0
         ret[1:] = close[1:] / close[:-1] - 1.0
         cash_daily = cfg.cash_yield / TRADING_DAYS
+        filtered_opens = 0  # premium-sell opens skipped by entry filters
 
         # ``sleeve_value`` is the compounding book (equity + cash). Realized option
         # P&L is settled into it on every close so it compounds thereafter, exactly
@@ -505,7 +552,12 @@ class OptionsOverlayBacktester:
                     if regime == MarketRegime.BULL_EXPANSION and not any(
                         p.action == OptionAction.SELL_COVERED_CALL for p in open_positions
                     ):
-                        pos = self._static_cc_position(S, sigma_base, sleeve_value, w_eq, dates[i])
+                        allowed, _ = self._entry_allowed(
+                            OptionAction.SELL_COVERED_CALL, rsi[i], adx[i])
+                        if not allowed:
+                            filtered_opens += 1
+                        pos = (self._static_cc_position(S, sigma_base, sleeve_value, w_eq, dates[i])
+                               if allowed else None)
                         if pos is not None:
                             open_positions.append(pos)
                             premium_collected += -pos.value_entry * 100 * pos.contracts
@@ -535,9 +587,12 @@ class OptionsOverlayBacktester:
                     if action != OptionAction.IDLE and not any(
                         p.action == action for p in open_positions
                     ):
-                        pos = self._open_position(
+                        allowed, _ = self._entry_allowed(action, rsi[i], adx[i])
+                        if not allowed:
+                            filtered_opens += 1
+                        pos = (self._open_position(
                             action, S, sigma_base, sleeve_value, w_eq, dates[i]
-                        )
+                        ) if allowed else None)
                         if pos is not None:
                             open_positions.append(pos)
                             if pos.is_credit:
@@ -557,6 +612,7 @@ class OptionsOverlayBacktester:
         kpis = self._compute_kpis(
             equity_curve, closed, premium_collected, debit_paid, total_option_pnl
         )
+        kpis["Entry-Filter Blocks"] = filtered_opens
         return BacktestResult(cfg.model, equity_curve, kpis, closed)
 
     # -- taxable two-bucket loop ------------------------------------------- #
@@ -574,12 +630,15 @@ class OptionsOverlayBacktester:
         rsi = df["RSI"].values.astype(float)
         iv = df["IV"].values.astype(float)
         ivr = df["IV_Rank"].values.astype(float)
+        adx = (df["ADX"].values.astype(float) if "ADX" in df.columns
+               else np.full(n, np.nan))
         dates = df.index
         ret = np.empty(n)
         ret[0] = 0.0
         ret[1:] = close[1:] / close[:-1] - 1.0
         cash_daily = cfg.cash_yield / TRADING_DAYS
         rate = cfg.tax_rate
+        filtered_opens = 0
 
         equity_mv = 0.0
         cash_mv = cfg.initial_capital
@@ -681,7 +740,12 @@ class OptionsOverlayBacktester:
                     if regime == MarketRegime.BULL_EXPANSION and not any(
                         p.action == OptionAction.SELL_COVERED_CALL for p in open_positions
                     ):
-                        pos = self._static_cc_position(S, sigma_base, nav, w_eq, dates[i])
+                        allowed, _ = self._entry_allowed(
+                            OptionAction.SELL_COVERED_CALL, rsi[i], adx[i])
+                        if not allowed:
+                            filtered_opens += 1
+                        pos = (self._static_cc_position(S, sigma_base, nav, w_eq, dates[i])
+                               if allowed else None)
                         if pos is not None:
                             open_positions.append(pos)
                             premium_collected += -pos.value_entry * 100 * pos.contracts
@@ -698,7 +762,11 @@ class OptionsOverlayBacktester:
                     if action != OptionAction.IDLE and not any(
                         p.action == action for p in open_positions
                     ):
-                        pos = self._open_position(action, S, sigma_base, nav, w_eq, dates[i])
+                        allowed, _ = self._entry_allowed(action, rsi[i], adx[i])
+                        if not allowed:
+                            filtered_opens += 1
+                        pos = (self._open_position(action, S, sigma_base, nav, w_eq, dates[i])
+                               if allowed else None)
                         if pos is not None:
                             open_positions.append(pos)
                             if pos.is_credit:
@@ -721,6 +789,7 @@ class OptionsOverlayBacktester:
             equity_curve, closed, premium_collected, debit_paid, total_option_pnl,
             taxes_paid=taxes_paid,
         )
+        kpis["Entry-Filter Blocks"] = filtered_opens
         return BacktestResult(cfg.model, equity_curve, kpis, closed)
 
     # -- metrics ----------------------------------------------------------- #

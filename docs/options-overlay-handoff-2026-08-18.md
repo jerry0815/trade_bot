@@ -154,6 +154,12 @@ are the only network touch-points: `options/_net.py`, `iv_loader.fetch_iv_rank_d
 ## 7. Open items / suggested next steps
 
 - [ ] **Run the real benchmark** and commit `docs/options-overlay-benchmark.md` (§1). *Highest priority.*
+- [ ] **Measure the opt-in RSI/ADX entry filters on real data** — they are OFF by
+      default (existing numbers unchanged) and unproven on a synthetic path. Run
+      `python -m options.run_benchmark --start 2018-01-01 --end 2026-08-17 --compare-filters`
+      to get the dynamic-model filters OFF-vs-ON table; keep them on only if they
+      improve risk-adjusted return on the real series. Tunables:
+      `premium_adx_max`, `premium_rsi_min`, `cc_rsi_max` on `OverlayConfig`.
 - [ ] **Sanity-check the real numbers** against 2020-COVID and 2022 windows — confirm the
       bear-defense allocation and CC-liquidation actually reduce drawdown vs Buy&Hold.
 - [ ] **Set the `DISCORD_WEBHOOK` repo secret** (user action) and confirm the
