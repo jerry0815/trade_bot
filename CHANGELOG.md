@@ -4,6 +4,25 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2026-08-19] — Docs: quantify + document the defensive rotation (positive result)
+
+The defensive rotation (`get_current_defensive_rotation` in `bot.py`: hold the
+best 126-day-momentum of KMLM/TLT/GLD/SHY when out of TQQQ) was a **live display
+feature never quantified** — the production backtest models "out" as cash.
+
+- **First backtest of it**, during the ~30% of days the trend rule is out of TQQQ,
+  best-momentum defensive vs cash: over 2005–2026 (TLT/GLD/SHY) rotation adds
+  **+4.7pp CAGR / +0.09 Sharpe** at ~equal drawdown; over 2021–2026 (4-asset incl.
+  KMLM) it adds **+10pp CAGR / +0.18 Sharpe and cuts drawdown −49% → −41%**, having
+  rotated out of TLT before the 2022 bond crash. A **positive** result (contrast with
+  the options overlay). Caveat: KMLM launched late 2020, so the 4-asset sample rests
+  on essentially one out-period — promising, not proven.
+- **Added** `docs/strategies/defensive-rotation.md`; README "How It Works" +
+  strategy index updated. Notes that since the rotation is live-only (not in the
+  rolling backtest), the headline strategy numbers *understate* the full system.
+
+---
+
 ## [2026-08-19] — Docs: research retrospective; remove the options live monitor
 
 - **Added** `docs/research-retrospective-2026-08.md` — a consolidated record of the

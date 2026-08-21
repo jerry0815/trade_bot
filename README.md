@@ -41,6 +41,8 @@ flowchart LR
 
 The **recommended action** is "in the market" only when both indices agree bullish **and** the trailing stop has not fired. The daily report prints this action twice — once for a **tax-advantaged account** (with the trailing stop) and once for a **taxable account** (dual-signal only, *without* the stop), because the stop's extra turnover is a net-negative return trade after tax (see [Tax Treatment](docs/strategies/tax-treatment.md)).
 
+When the recommendation is **out of TQQQ** (~30% of the time), the report also suggests a **[defensive rotation](docs/strategies/defensive-rotation.md)** — hold the strongest of KMLM / TLT / GLD / SHY by 126-day momentum instead of cash. Backtested during out-of-market periods it beats cash (+5 to +10pp CAGR, and it dodged the 2022 bond crash), though the managed-futures leg (KMLM) has only existed since late 2020, so the evidence is promising rather than proven. It is currently a **live display feature**, not yet in the production backtest — so the headline numbers above *understate* the full system.
+
 ### Explored and set aside (negative results)
 
 Several ideas for improving the strategy were tested and **none beat the production
@@ -97,6 +99,7 @@ Each strategy/feature has its own doc with the mechanics, its full result tables
 | **Core trend signal** (SMA 200 + ATR) | SMA 200 (ATR ×2.5) beats Buy & Hold at every leverage tier with a shallower drawdown; ~23% Avg TWR at 3x vs 3.1% B&H. | [core-trend-signal](docs/strategies/core-trend-signal.md) |
 | **Dual-signal agreement** | Best return + fewest trades of any signal rule: 25.81% Avg TWR, 9 trades — beats single-signal and T+2. | [dual-signal-agreement](docs/strategies/dual-signal-agreement.md) |
 | **Trailing stop** (crash protection) | Largest drawdown reducer in every crash: e.g. dot-com -83% → -51%, COVID -70% → -43%; Worst DD -85% → -65%. | [trailing-stop](docs/strategies/trailing-stop.md) |
+| **Defensive rotation** (out-of-market sleeve) | Best-momentum of KMLM/TLT/GLD/SHY beats cash while out of TQQQ: +5pp CAGR (2005–26) to +10pp with a shallower drawdown (2021–26, incl. KMLM). Live-only, not yet in the backtest; short KMLM history. | [defensive-rotation](docs/strategies/defensive-rotation.md) |
 | **Velocity stop** (alternative) | Equal-or-better crash protection than the peak stop but a real 3-6× larger return cost and *more* trades — not adopted. | [velocity-stop](docs/strategies/velocity-stop.md) |
 | **QQQ (1x)** | Unleveraged cross-check: dual-signal agreement again best at 14.69% Avg TWR / 9 trades; validates Table 1's 1x tier. | [qqq-1x](docs/strategies/qqq-1x.md) |
 | **Tax treatment** | After tax, the stop's return edge inverts for the dual pair (23.61% no-stop vs 19.82% with stop) — hence no stop in taxable accounts. | [tax-treatment](docs/strategies/tax-treatment.md) |
