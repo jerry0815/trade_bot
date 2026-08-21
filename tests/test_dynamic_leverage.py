@@ -161,3 +161,21 @@ def test_target_leverage_is_lookahead_free():
     # The bull close is day 1; its 3x exposure may only appear on day 2.
     assert tl[1] != 3.0
     assert tl[2] == 3.0
+
+
+def test_rebalances_counts_gear_changes_not_entries():
+    # Path: cash -> 3x (entry) -> 3x -> 1.5x (rebalance) -> 1.5x -> 0 (exit).
+    lev = [0.0, 3.0, 3.0, 1.5, 1.5, 0.0]
+    df = _frame("2000-01-01", [x > 0 for x in lev],
+                target_leverage=lev)
+    env = Backtester(verbose=False)
+    stats = env._calculate_trade_stats(df)
+    assert stats["total_trades"] == 1     # one entry from cash
+    assert stats["rebalances"] == 1       # the 3x -> 1.5x change
+
+
+def test_rebalances_zero_without_target_leverage():
+    df = _frame("2000-01-01", [True, True, False, True])
+    env = Backtester(verbose=False)
+    stats = env._calculate_trade_stats(df)
+    assert stats["rebalances"] == 0

@@ -964,10 +964,19 @@ class Backtester:
         total_cash_periods = len(cash_durations)
         avg_cash_hold = cash_durations.mean() if not cash_durations.empty else 0.0
 
+        # Rebalances: days the position changes leverage without going to cash
+        # (only meaningful for a variable-exposure sleeve).
+        rebalances = 0
+        if 'target_leverage' in df.columns:
+            lev = df['target_leverage'].values.astype(float)
+            prev = np.empty(len(lev)); prev[0] = 0.0; prev[1:] = lev[:-1]
+            rebalances = int(np.sum((lev > 0) & (prev > 0) & (lev != prev)))
+
         return {
             "total_trades": int(trades),
             "avg_cash_hold": float(avg_cash_hold),
-            "total_cash_periods": int(total_cash_periods)
+            "total_cash_periods": int(total_cash_periods),
+            "rebalances": rebalances
         }
 
     def _run_portfolio_math(self, df):
