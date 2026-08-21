@@ -26,6 +26,10 @@ as a documented negative finding, not an execution candidate.
 - **The only lever that meaningfully moves the deep drawdowns is leverage itself**
   (2× roughly halves the worst-case drawdown for a modest return give-up — already
   quantified in the leverage-tier tables). Signal cleverness does not.
+- **A dynamic 3-gear leverage rule (screened, not confirmed) is no exception.**
+  Reusing the same SMA+ATR bands to drive a reduced-leverage middle gear instead of
+  binary in/out beat neither baseline on Calmar or Sharpe, and deepened the worst
+  drawdown. **Screen negative — confirm stage not run.** See §7.
 
 ---
 
@@ -105,3 +109,45 @@ if anything generous to the put buyer).
   collar monitor and its scheduled workflow were **removed**.
 - Trend strategy: **unchanged.** The production dual-signal + 8%/60d trailing-stop
   rule (with defensive rotation) stands as the recommendation.
+
+## 7. Dynamic-leverage 3-gear (negative screen)
+
+A separate idea: keep the existing SMA+ATR band signal but stop treating its
+neutral zone as "hold prior position." Instead, map the same three band states to
+three fixed exposures — 3× above the upper band, cash below the lower band, and a
+defined **middle gear** inside the band — and sweep the middle gear over {1.0×,
+1.5×, 2.0×}. The only behavioral change versus the binary rule is removing that
+neutral-zone hysteresis in favor of an explicit reduced-leverage sleeve.
+
+**Screen (1990–2026, single-signal ^NDX sleeve, pre-tax, frictionless):**
+
+| Strategy | CAGR | Worst DD | Calmar | Sharpe | Trades | Rebal |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Binary 3x (baseline) | 25.49% | -81.37% | 0.31 | 0.68 | 20 | 0 |
+| Fixed 2x (same signal) | 21.93% | -62.49% | 0.35 | 0.71 | 20 | 0 |
+| 3-Gear (mid 1.0x) | 19.07% | -88.55% | 0.22 | 0.60 | 111 | 374 |
+| 3-Gear (mid 1.5x) | 20.34% | -90.87% | 0.22 | 0.62 | 111 | 374 |
+| 3-Gear (mid 2.0x) | 21.04% | -93.35% | 0.23 | 0.63 | 111 | 374 |
+
+No middle gear beats *either* baseline on Calmar or Sharpe (0.22–0.23 vs 0.31 /
+0.35 Calmar; 0.60–0.63 vs 0.68 / 0.71 Sharpe) — fixed 2× remains the risk-adjusted
+winner. This is the same standing conclusion as §1: leverage **tier** is the
+load-bearing lever, not signal cleverness, and turning the same signal into a
+finer-grained rule doesn't change that.
+
+The deeper drawdown is the more interesting (and counterintuitive) part. Binary 3×
+holds a position until the signal flips and simply sits out the rest — 20 trades,
+zero rebalances. Removing the hysteresis means the rule re-levers to the middle
+gear the moment price ticks back above the lower band, even inside a choppy
+bottoming process — 111 trades and 374 rebalances. Each of those re-entries buys
+leveraged exposure mid-decline, so the "middle gear" doesn't cushion the drawdown,
+it bleeds through the transition zone, repeatedly re-adding risk before the
+downtrend is actually over. That mechanism, not the lower nominal leverage, is why
+every middle-gear row draws down *more* than the all-or-nothing binary rule.
+
+This is a **single-path, frictionless screen**, not a headline. Per the staged
+plan, the rolling-window + reconstruction confirm stage is gated on the screen
+clearing the bar (§5 of the plan) — it did not, so that stage was **not run**.
+See [`backtest/dynamic_leverage_screen_output.md`](../backtest/dynamic_leverage_screen_output.md)
+for the raw output and [`backtest/dynamic_leverage_screen.py`](../backtest/dynamic_leverage_screen.py)
+for the reproducing script.
