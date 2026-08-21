@@ -968,27 +968,42 @@ class Backtester:
         # month — the trigger for a monthly DCA injection.
         month_key_arr = np.asarray(dates.year) * 12 + np.asarray(dates.month)
 
-        # --- Vectorised transition masks ---
-        prev_mkt     = np.empty(n, dtype=bool)
-        prev_mkt[0]  = False
-        prev_mkt[1:] = in_mkt[:-1]
-        entering_mask = in_mkt  & ~prev_mkt   # False→True flip
-        exiting_mask  = ~in_mkt & prev_mkt    # True→False flip
+        # --- Per-day target leverage ---
+        # A strategy may emit a `target_leverage` column (0..3) for a variable-
+        # exposure sleeve. Absent, fall back to the scalar `self.leverage` gated
+        # by in_market — bit-for-bit identical to the pre-vector behavior.
+        if 'target_leverage' in df.columns:
+            new_L = np.nan_to_num(df['target_leverage'].values.astype(float))
+        else:
+            new_L = np.where(in_mkt, float(self.leverage), 0.0)
+        old_L      = np.empty(n, dtype=float)
+        old_L[0]   = 0.0
+        old_L[1:]  = new_L[:-1]
+
+        in_now  = new_L > 0
+        in_prev = old_L > 0
+        entering_mask = in_now & ~in_prev                    # cash -> position
+        exiting_mask  = ~in_now & in_prev                    # position -> cash
+        gear_change   = in_now & in_prev & (new_L != old_L)  # rebalance, stay invested
 
         # --- Pre-compute the full daily_return array in one vectorised pass ---
-        leverage_drag = (((self.leverage - 1) * br_arr) + self.expense_ratio) / 252
-        cash_ret      = (br_arr * 0.8) / 252
+        drag_new = (((new_L - 1) * br_arr) + self.expense_ratio) / 252
+        drag_old = (((old_L - 1) * br_arr) + self.expense_ratio) / 252
+        cash_ret = (br_arr * 0.8) / 252
 
-        # Default: leveraged close-to-close when in market, cash when out
-        daily_ret_arr = np.where(in_mkt,
-                                 ret_arr * self.leverage - leverage_drag,
-                                 cash_ret)
-        # Entry days: only earn open→close (entered at open, missed overnight gap)
-        daily_ret_arr[entering_mask] = (o2c_arr[entering_mask] * self.leverage
-                                        - leverage_drag[entering_mask])
-        # Exit days: sell at open, capture only overnight gap at leverage
-        daily_ret_arr[exiting_mask]  = (ovn_arr[exiting_mask] * self.leverage
-                                        - leverage_drag[exiting_mask])
+        # Hold default: leveraged close-to-close when in market, cash when out.
+        daily_ret_arr = np.where(in_now, ret_arr * new_L - drag_new, cash_ret)
+        # Entry days: entered at open, only earn open->close at the new exposure.
+        daily_ret_arr[entering_mask] = (o2c_arr[entering_mask] * new_L[entering_mask]
+                                        - drag_new[entering_mask])
+        # Exit days: sold at open, only the overnight gap at the OLD exposure.
+        daily_ret_arr[exiting_mask]  = (ovn_arr[exiting_mask] * old_L[exiting_mask]
+                                        - drag_old[exiting_mask])
+        # Gear-change days: overnight gap at old exposure, intraday at new (a
+        # next-day-open rebalance). Reduces to entry/exit when one side is 0.
+        daily_ret_arr[gear_change]   = (ovn_arr[gear_change] * old_L[gear_change]
+                                        + o2c_arr[gear_change] * new_L[gear_change]
+                                        - drag_new[gear_change])
 
         # --- Scalar loop: only handles running-value-dependent state ---
         portfolio_value = self.initial_fund
