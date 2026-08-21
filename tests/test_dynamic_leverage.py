@@ -179,3 +179,19 @@ def test_rebalances_zero_without_target_leverage():
     env = Backtester(verbose=False)
     stats = env._calculate_trade_stats(df)
     assert stats["rebalances"] == 0
+
+
+from backtest.dynamic_leverage_screen import sharpe_from_equity, calmar
+
+
+def test_calmar_is_cagr_over_maxdd():
+    assert abs(calmar(0.20, -0.50) - 0.40) < 1e-9    # 20% / 50%
+    assert calmar(0.20, 0.0) == float("inf")          # no drawdown guard
+
+
+def test_sharpe_of_constant_growth_is_large_and_finite():
+    # A perfectly smooth up-curve has ~zero return vol -> very high Sharpe.
+    idx = pd.date_range("2000-01-01", periods=300, freq="B")
+    eq = pd.Series(10000 * (1.0002 ** np.arange(300)), index=idx)
+    s = sharpe_from_equity(eq)
+    assert np.isfinite(s) and s > 5
