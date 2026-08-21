@@ -741,6 +741,40 @@ class DualSignalAgreement(BaseStrategy):
         stats["trailing_stop"] = self._trailing_stop_status(self.df, price=gspc_close)
         return stats
 
+class DynamicLeverageTrend(BaseStrategy):
+    """Single-signal 3-gear leverage: one index's SMA+ATR band maps to
+    {3x above the upper band, `middle_gear` inside the band, 0x below the
+    lower band}. Unlike the binary rule, the neutral band is a defined
+    reduced-exposure sleeve rather than a 'hold prior position' state.
+    Signal is shifted one day for next-day-open execution (lookahead-free)."""
+
+    def __init__(self, middle_gear, sma_window=200, atr_multiplier=2.5,
+                 signal_ticker="^NDX"):
+        super().__init__(name=f"Dynamic-Leverage 3-Gear (mid {middle_gear}x, "
+                              f"ATR x{atr_multiplier})")
+        self.middle_gear = float(middle_gear)
+        self.sma_window = sma_window
+        self.atr_multiplier = atr_multiplier
+        self.signal_ticker = signal_ticker
+
+    def _add_indicator_logic(self, df):
+        df = df.copy()
+        upper = df['SMA'] + df['ATR'] * self.atr_multiplier
+        lower = df['SMA'] - df['ATR'] * self.atr_multiplier
+        bull = df['Close'] > upper
+        bear = df['Close'] < lower
+
+        # State BEFORE the execution shift: 3x bull, middle in-band, 0 bear.
+        state = np.where(bull, 3.0, np.where(bear, 0.0, self.middle_gear))
+        state = pd.Series(state, index=df.index)
+
+        # Seed initial exposure from the first day's own state, then shift 1
+        # day so today's exposure is decided by yesterday's close.
+        initial = float(state.iloc[0])
+        df['target_leverage'] = state.shift(1).fillna(initial).astype(float)
+        df['in_market'] = df['target_leverage'] > 0
+        return df
+
 class VolatilityFilter(BaseStrategy):
     def __init__(self, name="VIX Filter (<25)", vix_threshold=25):
         super().__init__(name)

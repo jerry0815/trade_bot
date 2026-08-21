@@ -12,6 +12,7 @@ import pandas as pd
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 from backtest.strat_backtest import Backtester
+from backtest.strat_backtest import DynamicLeverageTrend
 
 
 def _frame(start, in_market, ret=0.0, o2c=0.0, ovn=0.0, br=0.0, target_leverage=None):
@@ -110,3 +111,51 @@ def test_cash_day_earns_money_market_only():
     daily_cash = 0.05 * 0.8 / 252
     expected = _final_from_daily([daily_cash] * 3)
     assert abs(res["final_value"] / 10000 - expected) < 1e-9
+
+
+def _band_frame(closes, sma=100.0, atr=10.0, mult=2.5):
+    """Frame where Close crosses a fixed SMA+/-mult*ATR band.
+
+    Upper = sma + mult*atr, Lower = sma - mult*atr. Above upper -> bull (3x),
+    below lower -> bear (cash), between -> transition (middle gear).
+    """
+    idx = pd.date_range("2000-01-01", periods=len(closes), freq="D")
+    n = len(idx)
+    return pd.DataFrame({
+        "Close": np.asarray(closes, dtype=float),
+        "SMA": np.full(n, sma),
+        "ATR": np.full(n, atr),
+        "Daily_Return_1x": np.zeros(n),
+        "Open2Close": np.zeros(n),
+        "Overnight_Return": np.zeros(n),
+    }, index=idx)
+
+
+def test_three_states_map_to_three_gears():
+    # Upper=125, Lower=75. Closes chosen to sit clearly bull / mid / bear.
+    strat = DynamicLeverageTrend(middle_gear=1.5)
+    closes = [130, 130, 100, 100, 60, 60]   # bull, bull, mid, mid, bear, bear
+    df = _band_frame(closes)
+    out, _ = strat.generate_signals(df.copy())
+
+    # target_leverage is the state shifted by 1 day (next-day-open execution),
+    # so assert on the post-shift alignment: state[t] acts at t+1.
+    tl = out["target_leverage"].tolist()
+    # Day0 seeds the initial state; the mapping shows from day 1 onward.
+    assert tl[1] == 3.0     # yesterday bull  -> 3x today
+    assert tl[3] == 1.5     # yesterday mid   -> middle gear today
+    assert tl[5] == 0.0     # yesterday bear  -> cash today
+    assert (out["in_market"] == (out["target_leverage"] > 0)).all()
+
+
+def test_target_leverage_is_lookahead_free():
+    # A single bull day surrounded by mid days must not raise today's leverage
+    # until the day AFTER the bull close (signal shifted by 1).
+    strat = DynamicLeverageTrend(middle_gear=1.0)
+    closes = [100, 130, 100]   # mid, bull, mid
+    df = _band_frame(closes)
+    out, _ = strat.generate_signals(df.copy())
+    tl = out["target_leverage"].tolist()
+    # The bull close is day 1; its 3x exposure may only appear on day 2.
+    assert tl[1] != 3.0
+    assert tl[2] == 3.0
