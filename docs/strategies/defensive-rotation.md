@@ -36,26 +36,31 @@ longer proxy, **validated by daily-return correlation vs the real ETF**:
 | **KMLM** | **RYMTX** | **2007** | **0.54** ⚠️ |
 
 Applied only during the production rule's out-of-market days, best-momentum asset vs
-cash (on the reconstructed-TQQQ production path). *Read the difference, not the
-window-specific levels.*
+**holding SGOV** (real 0–3 mo T-bills, spliced onto VFISX for history) — the benchmark
+you'd actually park in. On the reconstructed-TQQQ production path. *Read the
+difference, not the window-specific levels.*
 
-| Window | out = cash | out = rotation | Δ CAGR | Δ Sharpe | Δ MaxDD |
+| Window | out = hold SGOV | out = rotation | Δ CAGR | Δ Sharpe | Δ MaxDD |
 | :--- | :--- | :--- | ---: | ---: | ---: |
-| 3-asset (TLT/GLD/SHY), 2000–2026 | 15.9% / −60.2% / 0.46 | 19.0% / −61.9% / 0.52 | **+3.1** | +0.06 | −1.7 (worse) |
-| 4-asset incl KMLM, 2007–2026 | 23.5% / −49.2% / 0.62 | 29.1% / −47.8% / 0.71 | **+5.6** | +0.09 | +1.4 |
-| *4-asset, real ETFs 2021–2026 (short)* | 15.4% / −48.8% / 0.45 | 25.7% / −41.3% / 0.63 | *+10.3* | *+0.18* | *+7.5* |
+| 3-asset (TLT/GLD/SHY), 2000–2026 | 15.9% / −60.4% / 0.46 | 19.0% / −61.9% / 0.52 | **+3.1** | +0.06 | −1.5 (worse) |
+| 4-asset incl KMLM, 2007–2026 | 23.0% / −50.2% / 0.61 | 29.1% / −47.8% / 0.71 | **+6.1** | +0.10 | +2.4 |
 
-*(CAGR% / MaxDD% / Sharpe. The last row is the short real-ETF window; treat it as
-one data point, not a trend.)*
+*(CAGR% / MaxDD% / Sharpe.)* Holding SGOV came out ~identical to a flat-4.5% cash
+assumption (15.9% and 23.0% vs 15.9% / 23.5%) — the out-of-market periods weren't
+concentrated in the zero-rate years (2022's long out-period had *rising* rates), so
+T-bills averaged close to cash. A short real-ETF window (2021–2026, incl. real KMLM)
+showed a bigger +10pp gap, but that is essentially one out-period (2022) — treat it as
+a data point, not a trend.
 
 ## Conclusion — a modest return tailwind, not a crisis hedge
 
-- **The rotation reliably adds a little return** (~+3 to +6pp CAGR, +0.06–0.09
-  Sharpe) across windows. Defensive momentum has a mild positive expectancy — holding
-  whichever of bonds/gold/managed-futures is trending beats idle cash.
+- **The rotation reliably adds a little return** (~+3 to +6pp CAGR, +0.06–0.10
+  Sharpe) across windows, **vs actually holding SGOV**. Defensive momentum has a mild
+  positive expectancy — holding whichever of bonds/gold/managed-futures is trending
+  beats parking in T-bills.
 - **The drawdown / "crisis-alpha" benefit does *not* hold up.** Over the longer
   windows the max drawdown is ~neutral, and the 2008 drawdown was slightly *worse*
-  with rotation than with cash. The eye-catching −49% → −41% drawdown cut was a
+  with rotation than with SGOV. The eye-catching −49% → −41% drawdown cut was a
   **short-sample artifact of 2022**, where the *real* KMLM had a banner year — not a
   robust property (2008 didn't repeat it).
 - **The managed-futures leg is on weak evidence.** RYMTX tracks KMLM at only 0.54

@@ -3,8 +3,9 @@
 `bot.py`'s `get_current_defensive_rotation` holds the strongest 126-day-momentum
 of KMLM / TLT / GLD / SHY when out of TQQQ. The real ETFs are short-lived (KMLM
 from 2020), so this module splices each onto a longer mutual-fund / futures proxy,
-validates the proxy against the real ETF, and backtests "out = rotation" vs
-"out = cash" over the production trend allocation.
+validates the proxy against the real ETF, and backtests "out = rotation" vs the
+"hold SGOV" benchmark (real 0–3 mo T-bills, spliced onto VFISX for history) over
+the production trend allocation.
 
 Honest limits: managed futures (KMLM) has no proxy before 2007 and RYMTX tracks
 KMLM only loosely (daily-return corr ~0.54), so the 4-asset result is evidence-
@@ -57,6 +58,14 @@ def rotation_returns(px: pd.DataFrame) -> pd.Series:
     return dr.fillna(0.0)
 
 
+def sgov_returns(index) -> pd.Series:
+    """The 'hold SGOV' benchmark: real SGOV daily returns (0–3 mo T-bills, from
+    2020) spliced onto VFISX (short-term Treasury, from 1991) for the long history."""
+    sg = _close("SGOV", index).pct_change()
+    vf = _close("VFISX", index).pct_change()
+    return sg.where(sg.notna(), vf).fillna(0.0)
+
+
 def _metrics(ret: pd.Series) -> tuple[float, float, float]:
     nav = (1 + ret).cumprod()
     yrs = (ret.index[-1] - ret.index[0]).days / 365.25
@@ -66,17 +75,16 @@ def _metrics(ret: pd.Series) -> tuple[float, float, float]:
     return cagr, mdd, sharpe
 
 
-def run(assets, start: str, in_market: pd.Series, tqqq_ret: pd.Series):
-    """Compare out=cash vs out=rotation over the production allocation."""
+def run(assets, start: str, in_market: pd.Series, tqqq_ret: pd.Series, benchmark: pd.Series):
+    """Compare out=SGOV (``benchmark``) vs out=rotation over the production allocation."""
     px, val = spliced_prices(assets, in_market.index)
     dr = rotation_returns(px)
     mask = (in_market.index >= pd.Timestamp(start)) & px.notna().all(axis=1)
-    cash_daily = CASH_YIELD / 252
-    base = pd.Series(np.where(in_market, tqqq_ret, cash_daily), index=in_market.index)[mask]
+    base = pd.Series(np.where(in_market, tqqq_ret, benchmark), index=in_market.index)[mask]
     rot = pd.Series(np.where(in_market, tqqq_ret, dr), index=in_market.index)[mask]
     return {"validation": val, "window": (base.index[0], base.index[-1]),
             "out_share": float((~in_market[mask]).mean()),
-            "cash": _metrics(base), "rotation": _metrics(rot)}
+            "sgov": _metrics(base), "rotation": _metrics(rot)}
 
 
 def main():  # pragma: no cover - network + long-running
@@ -86,16 +94,17 @@ def main():  # pragma: no cover - network + long-running
     data = prepare_extended_data(start="1990-01-01", end=None)
     in_market = production_weight(data.index) > 0
     tqqq_ret = data["Close"].pct_change().fillna(0)
+    sgov = sgov_returns(data.index)
 
     for assets, start, label in [
         (["TLT", "GLD", "SHY"], "2000-09-01", "3-asset (bonds/gold/cash) — proxy to 2000"),
         (["KMLM", "TLT", "GLD", "SHY"], "2007-04-01", "4-asset incl managed futures — proxy to 2007"),
     ]:
-        r = run(assets, start, in_market, tqqq_ret)
+        r = run(assets, start, in_market, tqqq_ret, sgov)
         print(f"\n== {label}  ({r['window'][0].date()}..{r['window'][1].date()}, "
               f"out {r['out_share']*100:.0f}% of days) ==")
         print("  proxy corr: " + ", ".join(f"{a} {c:.2f}" for a, c in r["validation"].items()))
-        for tag in ("cash", "rotation"):
+        for tag in ("sgov", "rotation"):
             cg, md, sh = r[tag]
             print(f"  out = {tag:9} CAGR {cg:6.1f}  MDD {md:7.1f}  Sharpe {sh:5.2f}")
 
