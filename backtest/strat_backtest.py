@@ -746,16 +746,20 @@ class DynamicLeverageTrend(BaseStrategy):
     {3x above the upper band, `middle_gear` inside the band, 0x below the
     lower band}. Unlike the binary rule, the neutral band is a defined
     reduced-exposure sleeve rather than a 'hold prior position' state.
-    Signal is shifted one day for next-day-open execution (lookahead-free)."""
+    Signal is shifted one day for next-day-open execution (lookahead-free).
 
-    def __init__(self, middle_gear, sma_window=200, atr_multiplier=2.5,
-                 signal_ticker="^NDX"):
+    Consumes the SMA/ATR band already present on the passed frame (the
+    Backtester's 200-day signal feed via get_cached_signals) rather than
+    recomputing it — this strategy has no sma_window or signal_ticker of
+    its own; the signal ticker and band window are both controlled by the
+    Backtester (its own signal_ticker arg and its 200-day get_cached_signals
+    feed), not by this class."""
+
+    def __init__(self, middle_gear, atr_multiplier=2.5):
         super().__init__(name=f"Dynamic-Leverage 3-Gear (mid {middle_gear}x, "
                               f"ATR x{atr_multiplier})")
         self.middle_gear = float(middle_gear)
-        self.sma_window = sma_window
         self.atr_multiplier = atr_multiplier
-        self.signal_ticker = signal_ticker
 
     def _add_indicator_logic(self, df):
         df = df.copy()

@@ -132,19 +132,21 @@ def _band_frame(closes, sma=100.0, atr=10.0, mult=2.5):
 
 
 def test_three_states_map_to_three_gears():
-    # Upper=125, Lower=75. Closes chosen to sit clearly bull / mid / bear.
+    # Upper=125, Lower=75. Closes chosen to sit clearly bull / mid / bear, one
+    # distinct state per day so the shift is load-bearing: if _add_indicator_logic
+    # forgot the .shift(1), tl would be [3.0, 1.5, 0.0] instead of the asserted
+    # [3.0, 3.0, 1.5].
     strat = DynamicLeverageTrend(middle_gear=1.5)
-    closes = [130, 130, 100, 100, 60, 60]   # bull, bull, mid, mid, bear, bear
+    closes = [130, 100, 60]   # bull, mid, bear
     df = _band_frame(closes)
     out, _ = strat.generate_signals(df.copy())
 
-    # target_leverage is the state shifted by 1 day (next-day-open execution),
-    # so assert on the post-shift alignment: state[t] acts at t+1.
+    # Pre-shift state is [3.0, 1.5, 0.0]; day 0 seeds initial=3.0 (its own
+    # state), then each day's target_leverage reflects YESTERDAY's state.
     tl = out["target_leverage"].tolist()
-    # Day0 seeds the initial state; the mapping shows from day 1 onward.
-    assert tl[1] == 3.0     # yesterday bull  -> 3x today
-    assert tl[3] == 1.5     # yesterday mid   -> middle gear today
-    assert tl[5] == 0.0     # yesterday bear  -> cash today
+    assert tl[0] == 3.0     # day0 seed = day0's own (bull) state
+    assert tl[1] == 3.0     # yesterday (day0) bull -> 3x today
+    assert tl[2] == 1.5     # yesterday (day1) mid  -> middle gear today
     assert (out["in_market"] == (out["target_leverage"] > 0)).all()
 
 
