@@ -55,3 +55,58 @@ def test_constant_2x_vector_matches_scalar_2x():
     env_any = Backtester(leverage=3, expense_ratio=0.0095, verbose=False)  # scalar ignored
     got = env_any._run_portfolio_math(df2)["final_value"]
     assert abs(got - scalar_2x) < 1e-9
+
+
+def _final_from_daily(returns):
+    """Compound a list of daily returns into a growth factor."""
+    f = 1.0
+    for r in returns:
+        f *= (1 + r)
+    return f
+
+
+def test_gear_change_day_uses_overnight_old_intraday_new():
+    # Day 0: enter at 3x. Day 1: hold 3x. Day 2: gear-change 3x -> 1.5x.
+    # BR=0 so drag=0 and cash_ret=0; isolates the return formula.
+    lev = [3.0, 3.0, 1.5]
+    df = _frame("2000-01-01", [True, True, True],
+                ret=0.010, o2c=0.006, ovn=0.004, br=0.0, target_leverage=lev)
+    env = Backtester(leverage=3, expense_ratio=0.0, verbose=False)
+    res = env._run_portfolio_math(df)
+
+    # Day0 entry: o2c*3 ; Day1 hold: ret*3 ; Day2 gear-change: ovn*3 + o2c*1.5
+    expected = _final_from_daily([
+        0.006 * 3.0,
+        0.010 * 3.0,
+        0.004 * 3.0 + 0.006 * 1.5,
+    ])
+    assert abs(res["final_value"] / 10000 - expected) < 1e-9
+
+
+def test_exit_day_uses_overnight_at_old_leverage():
+    # Day 0: enter 2x. Day 1: hold 2x. Day 2: exit to cash.
+    lev = [2.0, 2.0, 0.0]
+    df = _frame("2000-01-01", [True, True, False],
+                ret=0.010, o2c=0.006, ovn=0.004, br=0.0, target_leverage=lev)
+    env = Backtester(leverage=2, expense_ratio=0.0, verbose=False)
+    res = env._run_portfolio_math(df)
+
+    expected = _final_from_daily([
+        0.006 * 2.0,   # entry: open->close at 2x
+        0.010 * 2.0,   # hold
+        0.004 * 2.0,   # exit: overnight gap at the OLD (2x) exposure
+    ])
+    assert abs(res["final_value"] / 10000 - expected) < 1e-9
+
+
+def test_cash_day_earns_money_market_only():
+    # Never in market: every day earns BR*0.8/252, at no leverage.
+    lev = [0.0, 0.0, 0.0]
+    df = _frame("2000-01-01", [False, False, False],
+                ret=0.05, o2c=0.05, ovn=0.05, br=0.05, target_leverage=lev)
+    env = Backtester(leverage=3, expense_ratio=0.0095, verbose=False)
+    res = env._run_portfolio_math(df)
+
+    daily_cash = 0.05 * 0.8 / 252
+    expected = _final_from_daily([daily_cash] * 3)
+    assert abs(res["final_value"] / 10000 - expected) < 1e-9
