@@ -4,6 +4,27 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2026-08-19] — Feat: proxy-extended defensive-rotation backtest (finding downgraded)
+
+Wires the defensive rotation into a longer backtest using validated proxies — which
+**walks back the earlier optimistic short-window result**.
+
+- **Added** `backtest/defensive_rotation_backtest.py`: splices each defensive ETF
+  onto a longer-history proxy (TLT→VUSTX 1986 corr 0.98, GLD→gold-futures 2000 corr
+  0.89, SHY→VFISX 1991 corr 0.81, KMLM→RYMTX 2007 corr **0.54**), validates it, and
+  backtests out=rotation vs out=cash. Reproduce with
+  `python -m backtest.defensive_rotation_backtest`.
+- **Finding, corrected.** Over the longer windows (3-asset to 2000, 4-asset to 2007)
+  the rotation adds a **modest return only** (~+3 to +6pp CAGR, +0.06–0.09 Sharpe).
+  The drawdown / "dodged the 2022 bond crash" benefit **does not hold up** — max
+  drawdown is ~neutral and 2008 was slightly *worse*; the −49%→−41% cut was a
+  2022-specific effect of the *real* KMLM (unavailable pre-2020) and rests on a weak
+  managed-futures proxy. So it is a small return sweetener, **not** a crisis hedge,
+  and is kept as a live suggestion rather than a production default.
+- `docs/strategies/defensive-rotation.md` and README updated to the sober conclusion.
+
+---
+
 ## [2026-08-19] — Docs: quantify + document the defensive rotation (positive result)
 
 The defensive rotation (`get_current_defensive_rotation` in `bot.py`: hold the
