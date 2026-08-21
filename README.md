@@ -5,6 +5,24 @@ This project is an automated trading monitor system designed for long-term inves
 
 ---
 
+## TL;DR
+
+**The strategy:** hold **3× TQQQ only when the NASDAQ-100 *and* S&P 500 both trend bullish** (200-day SMA + 2.5·ATR); otherwise rotate to defensive assets / cash. A **tax-advantaged** account adds an **8% / 60-day S&P trailing stop** for crash protection; a **taxable** account skips it (the stop's extra turnover is net-negative after tax). One daily recommendation, from `bot.py`.
+
+**Performance** — 26-year rolling windows, next-day-open execution, era-accurate borrow rates + tax modeling ([methodology](docs/strategies/methodology.md)):
+
+| Configuration | Avg annual return | Worst drawdown | Trades / 26y |
+| :--- | ---: | ---: | ---: |
+| Dual-signal **+ trailing stop** (tax-advantaged) | **24.6%** | **−65%** | ~18 |
+| Dual-signal, no stop (taxable) | 25.8% | −85% | ~9 |
+| Buy & Hold 3× (baseline) | 3.1% | −100% | 1 |
+
+On a single continuous 1990–2026 path, the recommended (with-stop) config returns **≈29%/yr** at **≈−61% max drawdown**, with **Sharpe ≈ 0.67** and **Calmar ≈ 0.47** (Sharpe/Calmar are single-path figures — the rolling engine reports the return distribution + drawdown above, not Sharpe).
+
+**In one line:** it turns a 3× ETF that Buy & Hold takes to ~−100% through the dot-com and 2008 bears into a survivable ~25%/yr compounder — at the cost of a still-deep ~−65% worst case, which is leverage's structural floor (dropping to 2× roughly halves it). Options overlays, an EMA signal, and volatility-targeted sizing were all tried and **did not improve on this** — see [Explored and set aside](#explored-and-set-aside-negative-results).
+
+---
+
 ### How It Works
 
 `bot.py` produces one daily recommendation by stacking three layers, each fixing a weakness of the layer before it. The Discord report shows the underlying signals for transparency, but the headline **recommended action** is the combined verdict of all three. Each layer has its own strategy doc with the full mechanics, backtests, and caveats:
