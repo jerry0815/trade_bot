@@ -131,6 +131,10 @@ negative finding folded into the retrospective — no rolling run needed.
   blended position. Minor, and conservative-ish; noted, not modeled.
 - All screen results are single-path and frictionless — magnitudes approximate; only the
   *ranking* vs baselines is load-bearing, and only after the confirm stage.
+- **Tax:** the engine realizes gains only on a *full exit to cash*; an intra-position gear
+  change (e.g. 3×→1.5×) is treated as a non-taxable rebalance. This is a simplification —
+  irrelevant to the pre-tax screen, but the confirm stage (if reached, on the tax-aware
+  production sleeve) must flag it, since real de-risking would realize a partial gain.
 
 ## 8. Testing (TDD)
 
