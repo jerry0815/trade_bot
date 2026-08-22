@@ -652,6 +652,52 @@ class SMATrendFollowing(BaseStrategy):
 
         return df
 
+
+class VolTargetLeverage(SMATrendFollowing):
+    """Vol-targeted leverage on top of the binary SMA+ATR trend rule. Keeps
+    SMATrendFollowing's entry/exit (in_market) EXACTLY and only replaces the
+    fixed leverage with target-vol sizing while in-market:
+
+        L_t = clamp(target_vol / realized_vol_t, l_min, l_max)
+
+    where realized_vol_t is the trailing vol_window-day annualized vol of the
+    underlying, shifted one day so today's leverage uses only data through
+    yesterday. Out of market -> 0x (the hard crash exit is unchanged). The
+    idea: allow >3x in unusually calm strong uptrends (l_max>3), the one
+    leverage direction the cash-rotating trend rule does not already cover."""
+
+    def __init__(self, target_vol=0.45, l_min=1.0, l_max=3.0, vol_window=20,
+                 sma_window=200, atr_multiplier=2.5):
+        super().__init__(sma_window=sma_window, atr_multiplier=atr_multiplier)
+        self.name = (f"Vol-Target Leverage (tgt {target_vol:.0%}, "
+                     f"{l_min}-{l_max}x, {vol_window}d vol)")
+        self.target_vol = target_vol
+        self.l_min = l_min
+        self.l_max = l_max
+        self.vol_window = vol_window
+
+    @staticmethod
+    def _size_leverage(close, in_market, target_vol, l_min, l_max, vol_window):
+        """Pure vol-target sizing -> per-day target_leverage array. Lookahead-
+        free: realized vol is shifted one day. 0 where out of market or where
+        vol is undefined (warm-up)."""
+        realized_vol = close.pct_change().rolling(vol_window).std() * np.sqrt(252)
+        realized_vol = realized_vol.shift(1)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            target = (target_vol / realized_vol).clip(lower=l_min, upper=l_max)
+        invested = in_market.to_numpy(dtype=bool) & realized_vol.notna().to_numpy()
+        lev = np.where(invested, target.to_numpy(), 0.0)
+        return np.nan_to_num(lev, nan=0.0)
+
+    def _add_indicator_logic(self, df):
+        df = super()._add_indicator_logic(df)   # sets df['in_market'] (shifted)
+        df['target_leverage'] = self._size_leverage(
+            df['Close'], df['in_market'], self.target_vol,
+            self.l_min, self.l_max, self.vol_window)
+        df['in_market'] = df['target_leverage'] > 0
+        return df
+
+
 class DualSignalAgreement(BaseStrategy):
     """Requires ^NDX and ^GSPC's independent SMA+ATR trend signals to agree
     before flipping state — an alternative to T+2's temporal-persistence
@@ -740,6 +786,44 @@ class DualSignalAgreement(BaseStrategy):
         gspc_close = get_cached_signals("^GSPC")["Close"].reindex(self.df.index).ffill()
         stats["trailing_stop"] = self._trailing_stop_status(self.df, price=gspc_close)
         return stats
+
+class DynamicLeverageTrend(BaseStrategy):
+    """Single-signal 3-gear leverage: one index's SMA+ATR band maps to
+    {3x above the upper band, `middle_gear` inside the band, 0x below the
+    lower band}. Unlike the binary rule, the neutral band is a defined
+    reduced-exposure sleeve rather than a 'hold prior position' state.
+    Signal is shifted one day for next-day-open execution (lookahead-free).
+
+    Consumes the SMA/ATR band already present on the passed frame (the
+    Backtester's 200-day signal feed via get_cached_signals) rather than
+    recomputing it — this strategy has no sma_window or signal_ticker of
+    its own; the signal ticker and band window are both controlled by the
+    Backtester (its own signal_ticker arg and its 200-day get_cached_signals
+    feed), not by this class."""
+
+    def __init__(self, middle_gear, atr_multiplier=2.5):
+        super().__init__(name=f"Dynamic-Leverage 3-Gear (mid {middle_gear}x, "
+                              f"ATR x{atr_multiplier})")
+        self.middle_gear = float(middle_gear)
+        self.atr_multiplier = atr_multiplier
+
+    def _add_indicator_logic(self, df):
+        df = df.copy()
+        upper = df['SMA'] + df['ATR'] * self.atr_multiplier
+        lower = df['SMA'] - df['ATR'] * self.atr_multiplier
+        bull = df['Close'] > upper
+        bear = df['Close'] < lower
+
+        # State BEFORE the execution shift: 3x bull, middle in-band, 0 bear.
+        state = np.where(bull, 3.0, np.where(bear, 0.0, self.middle_gear))
+        state = pd.Series(state, index=df.index)
+
+        # Seed initial exposure from the first day's own state, then shift 1
+        # day so today's exposure is decided by yesterday's close.
+        initial = float(state.iloc[0])
+        df['target_leverage'] = state.shift(1).fillna(initial).astype(float)
+        df['in_market'] = df['target_leverage'] > 0
+        return df
 
 class VolatilityFilter(BaseStrategy):
     def __init__(self, name="VIX Filter (<25)", vix_threshold=25):
@@ -926,10 +1010,28 @@ class Backtester:
         total_cash_periods = len(cash_durations)
         avg_cash_hold = cash_durations.mean() if not cash_durations.empty else 0.0
 
+        # Rebalances: days the position changes leverage without going to cash
+        # (only meaningful for a variable-exposure sleeve).
+        rebalances = 0
+        if 'target_leverage' in df.columns:
+            lev = df['target_leverage'].values.astype(float)
+            prev = np.empty(len(lev)); prev[0] = 0.0; prev[1:] = lev[:-1]
+            rebalances = int(np.sum((lev > 0) & (prev > 0) & (lev != prev)))
+
+        # Average leverage over in-market days (only meaningful for a
+        # variable-exposure sleeve). NaN when there is no leverage column.
+        avg_leverage = float("nan")
+        if 'target_leverage' in df.columns:
+            lev = df['target_leverage'].values.astype(float)
+            in_mkt_lev = lev[lev > 0]
+            avg_leverage = float(in_mkt_lev.mean()) if in_mkt_lev.size else 0.0
+
         return {
             "total_trades": int(trades),
             "avg_cash_hold": float(avg_cash_hold),
-            "total_cash_periods": int(total_cash_periods)
+            "total_cash_periods": int(total_cash_periods),
+            "rebalances": rebalances,
+            "avg_leverage": avg_leverage
         }
 
     def _run_portfolio_math(self, df):
@@ -968,27 +1070,42 @@ class Backtester:
         # month — the trigger for a monthly DCA injection.
         month_key_arr = np.asarray(dates.year) * 12 + np.asarray(dates.month)
 
-        # --- Vectorised transition masks ---
-        prev_mkt     = np.empty(n, dtype=bool)
-        prev_mkt[0]  = False
-        prev_mkt[1:] = in_mkt[:-1]
-        entering_mask = in_mkt  & ~prev_mkt   # False→True flip
-        exiting_mask  = ~in_mkt & prev_mkt    # True→False flip
+        # --- Per-day target leverage ---
+        # A strategy may emit a `target_leverage` column (0..3) for a variable-
+        # exposure sleeve. Absent, fall back to the scalar `self.leverage` gated
+        # by in_market — bit-for-bit identical to the pre-vector behavior.
+        if 'target_leverage' in df.columns:
+            new_L = np.nan_to_num(df['target_leverage'].values.astype(float))
+        else:
+            new_L = np.where(in_mkt, float(self.leverage), 0.0)
+        old_L      = np.empty(n, dtype=float)
+        old_L[0]   = 0.0
+        old_L[1:]  = new_L[:-1]
+
+        in_now  = new_L > 0
+        in_prev = old_L > 0
+        entering_mask = in_now & ~in_prev                    # cash -> position
+        exiting_mask  = ~in_now & in_prev                    # position -> cash
+        gear_change   = in_now & in_prev & (new_L != old_L)  # rebalance, stay invested
 
         # --- Pre-compute the full daily_return array in one vectorised pass ---
-        leverage_drag = (((self.leverage - 1) * br_arr) + self.expense_ratio) / 252
-        cash_ret      = (br_arr * 0.8) / 252
+        drag_new = (((new_L - 1) * br_arr) + self.expense_ratio) / 252
+        drag_old = (((old_L - 1) * br_arr) + self.expense_ratio) / 252
+        cash_ret = (br_arr * 0.8) / 252
 
-        # Default: leveraged close-to-close when in market, cash when out
-        daily_ret_arr = np.where(in_mkt,
-                                 ret_arr * self.leverage - leverage_drag,
-                                 cash_ret)
-        # Entry days: only earn open→close (entered at open, missed overnight gap)
-        daily_ret_arr[entering_mask] = (o2c_arr[entering_mask] * self.leverage
-                                        - leverage_drag[entering_mask])
-        # Exit days: sell at open, capture only overnight gap at leverage
-        daily_ret_arr[exiting_mask]  = (ovn_arr[exiting_mask] * self.leverage
-                                        - leverage_drag[exiting_mask])
+        # Hold default: leveraged close-to-close when in market, cash when out.
+        daily_ret_arr = np.where(in_now, ret_arr * new_L - drag_new, cash_ret)
+        # Entry days: entered at open, only earn open->close at the new exposure.
+        daily_ret_arr[entering_mask] = (o2c_arr[entering_mask] * new_L[entering_mask]
+                                        - drag_new[entering_mask])
+        # Exit days: sold at open, only the overnight gap at the OLD exposure.
+        daily_ret_arr[exiting_mask]  = (ovn_arr[exiting_mask] * old_L[exiting_mask]
+                                        - drag_old[exiting_mask])
+        # Gear-change days: overnight gap at old exposure, intraday at new (a
+        # next-day-open rebalance). Reduces to entry/exit when one side is 0.
+        daily_ret_arr[gear_change]   = (ovn_arr[gear_change] * old_L[gear_change]
+                                        + o2c_arr[gear_change] * new_L[gear_change]
+                                        - drag_new[gear_change])
 
         # --- Scalar loop: only handles running-value-dependent state ---
         portfolio_value = self.initial_fund
