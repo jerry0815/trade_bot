@@ -652,6 +652,52 @@ class SMATrendFollowing(BaseStrategy):
 
         return df
 
+
+class VolTargetLeverage(SMATrendFollowing):
+    """Vol-targeted leverage on top of the binary SMA+ATR trend rule. Keeps
+    SMATrendFollowing's entry/exit (in_market) EXACTLY and only replaces the
+    fixed leverage with target-vol sizing while in-market:
+
+        L_t = clamp(target_vol / realized_vol_t, l_min, l_max)
+
+    where realized_vol_t is the trailing vol_window-day annualized vol of the
+    underlying, shifted one day so today's leverage uses only data through
+    yesterday. Out of market -> 0x (the hard crash exit is unchanged). The
+    idea: allow >3x in unusually calm strong uptrends (l_max>3), the one
+    leverage direction the cash-rotating trend rule does not already cover."""
+
+    def __init__(self, target_vol=0.45, l_min=1.0, l_max=3.0, vol_window=20,
+                 sma_window=200, atr_multiplier=2.5):
+        super().__init__(sma_window=sma_window, atr_multiplier=atr_multiplier)
+        self.name = (f"Vol-Target Leverage (tgt {target_vol:.0%}, "
+                     f"{l_min}-{l_max}x, {vol_window}d vol)")
+        self.target_vol = target_vol
+        self.l_min = l_min
+        self.l_max = l_max
+        self.vol_window = vol_window
+
+    @staticmethod
+    def _size_leverage(close, in_market, target_vol, l_min, l_max, vol_window):
+        """Pure vol-target sizing -> per-day target_leverage array. Lookahead-
+        free: realized vol is shifted one day. 0 where out of market or where
+        vol is undefined (warm-up)."""
+        realized_vol = close.pct_change().rolling(vol_window).std() * np.sqrt(252)
+        realized_vol = realized_vol.shift(1)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            target = (target_vol / realized_vol).clip(lower=l_min, upper=l_max)
+        invested = in_market.to_numpy(dtype=bool) & realized_vol.notna().to_numpy()
+        lev = np.where(invested, target.to_numpy(), 0.0)
+        return np.nan_to_num(lev, nan=0.0)
+
+    def _add_indicator_logic(self, df):
+        df = super()._add_indicator_logic(df)   # sets df['in_market'] (shifted)
+        df['target_leverage'] = self._size_leverage(
+            df['Close'], df['in_market'], self.target_vol,
+            self.l_min, self.l_max, self.vol_window)
+        df['in_market'] = df['target_leverage'] > 0
+        return df
+
+
 class DualSignalAgreement(BaseStrategy):
     """Requires ^NDX and ^GSPC's independent SMA+ATR trend signals to agree
     before flipping state — an alternative to T+2's temporal-persistence
