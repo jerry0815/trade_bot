@@ -972,11 +972,20 @@ class Backtester:
             prev = np.empty(len(lev)); prev[0] = 0.0; prev[1:] = lev[:-1]
             rebalances = int(np.sum((lev > 0) & (prev > 0) & (lev != prev)))
 
+        # Average leverage over in-market days (only meaningful for a
+        # variable-exposure sleeve). NaN when there is no leverage column.
+        avg_leverage = float("nan")
+        if 'target_leverage' in df.columns:
+            lev = df['target_leverage'].values.astype(float)
+            in_mkt_lev = lev[lev > 0]
+            avg_leverage = float(in_mkt_lev.mean()) if in_mkt_lev.size else 0.0
+
         return {
             "total_trades": int(trades),
             "avg_cash_hold": float(avg_cash_hold),
             "total_cash_periods": int(total_cash_periods),
-            "rebalances": rebalances
+            "rebalances": rebalances,
+            "avg_leverage": avg_leverage
         }
 
     def _run_portfolio_math(self, df):
