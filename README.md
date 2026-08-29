@@ -90,6 +90,26 @@ The bot's recommended configuration is **3x TQQQ, SMA 200 (ATR ×2.5) + dual-sig
 
 *26-year rolling backtest, 172 windows, 3x ^NDX (TQQQ). The trailing stop trades ~1pp of average return for a ~20pp shallower worst-case drawdown; in a taxable account the stop is a net-negative return trade after tax, so it is dropped there.*
 
+#### Shorter-horizon view — 10-year rolling windows (with Sharpe + 1× baseline)
+
+The same configs run over **10-year** windows instead of 26, which yields a much larger, more granular return distribution (365 windows) and lets the worst-case be read per-decade rather than per-generation:
+
+| Cfg | Strategy | Avg CAGR | Med CAGR | Worst-window CAGR | % windows <0 | Avg Sharpe | Mean maxDD | Worst DD |
+| :-- | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| A | SMA + T+2 (live baseline) | 23.6% | 23.6% | −4.5% | 0.8% | 0.66 | −69.2% | −83.4% |
+| B | A + GSPC stop 8%/60d | 25.3% | 25.4% | −2.4% | 0.8% | 0.70 | −55.4% | −64.8% |
+| C | Dual-signal (no T+2) | 28.4% | 29.6% | −6.7% | 1.4% | 0.71 | −69.2% | −84.9% |
+| **D** | **Dual-signal + GSPC stop 8%/60d** (recommended) | **26.5%** | 26.4% | **−2.8%** | **0.8%** | **0.72** | −55.4% | **−64.8%** |
+| BH | Buy & Hold ^NDX **1× (index)** | 13.6% | 13.9% | −8.4% | 7.7% | 0.67 | −53.9% | −82.9% |
+
+*365 monthly-overlapping 10-year windows (starts 1986–2016), next-day-open execution, pre-tax, cash when out of market. A–D are 3× ^NDX (TQQQ exposure); BH is the unleveraged NASDAQ-100 index at 0% fee. Sharpe is annualized on daily returns at rf = 0 (252-day convention). Because the windows overlap monthly, adjacent decades share ~99% of their data — they are not independent samples, so this distribution understates true sampling variance.*
+
+**Reading the table:**
+
+- **% windows <0** — the share of the 365 rolling decades whose *annualized return came out negative* (i.e. a losing 10-year hold). It measures how *often* a bad decade happened, not how deep it was (that's the drawdown columns). Only ~0.8% of decades lose money for D, vs 7.7% for simply holding the index.
+- **GSPC stop 8%/60d** — the crash-protection trailing stop (`^GSPC` = the S&P 500 index). While in a position, track the running peak of the **unleveraged** S&P 500 since entry; the day it closes **8% below that peak**, exit immediately, then block re-entry for a **60-trading-day cooldown**. Configs B and D add this stop; A and C do not — which is why B/D share the shallower drawdown floor (−65% worst vs −85%), since the stop, not the entry rule, sets the drawdown.
+- **Two takeaways:** (1) 3× leverage nearly doubles the index's CAGR (D 26.5% vs BH 13.6%) but is almost Sharpe-neutral (0.72 vs 0.67) — the payoff is more absolute return for a survivable drawdown, not a better risk-adjusted ratio. (2) D's worst-case drawdown (−65%) is actually *shallower* than buying and holding the raw index (−83%), because the trend rule + stop exit the dot-com and 2008 bears that a 1× hold rides all the way down.
+
 ### Strategy docs (detail + full tables)
 
 Each strategy/feature has its own doc with the mechanics, its full result tables, narrative, and caveats. Headline result per feature:
