@@ -1,8 +1,14 @@
 import time
+from pathlib import Path
+
 import yfinance as yf
 import pandas as pd
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor
+
+# On-disk cache of raw yfinance history, so backtests don't re-download every
+# run. Populated lazily by get_cached_data and (in bulk) by backtest/fetch_data.py.
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 # ---------------------------------------------------------------------------
 # Capital Gains Tax Rates (US defaults)
@@ -49,13 +55,35 @@ def _download_with_retry(tickers, period="5y", max_retries=5):
         "yfinance may be rate-limiting this runner."
     )
 
-def get_cached_data(ticker="^NDX"):
-    """Fetches raw data once and caches it."""
+def _data_path(ticker):
+    """On-disk CSV path for a ticker's raw history (caret stripped for the name)."""
+    return DATA_DIR / f"{ticker.replace('^', '')}.csv"
+
+
+def get_cached_data(ticker="^NDX", refresh=False):
+    """Fetches raw data once and caches it, in memory and on disk.
+
+    Lookup order: in-memory cache -> data/<ticker>.csv -> yfinance download
+    (which is then written to disk for next time). Pass refresh=True to force a
+    fresh download and overwrite the saved file (e.g. to pick up new bars after
+    market close).
+    """
+    if refresh:
+        DATA_CACHE.pop(ticker, None)
+
     if ticker not in DATA_CACHE:
-        # Download from 1985 to ensure all indicators are fully warmed up
-        df = yf.download(ticker, start="1985-01-01", progress=False, auto_adjust=False)
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
+        path = _data_path(ticker)
+        if not refresh and path.exists():
+            # Reuse the saved history — no network call.
+            df = pd.read_csv(path, index_col=0, parse_dates=True)
+        else:
+            # Download from 1985 to ensure all indicators are fully warmed up,
+            # then persist so future runs read from disk instead.
+            df = yf.download(ticker, start="1985-01-01", progress=False, auto_adjust=False)
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = df.columns.get_level_values(0)
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+            df.to_csv(path)
         DATA_CACHE[ticker] = df
     return DATA_CACHE[ticker].copy()
 
