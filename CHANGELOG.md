@@ -4,6 +4,40 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2026-09-16] — Feat: covered-call income optimizer (separate objective)
+
+Adds a focused engine for a **different question** than the negative options
+overlay finding: writing calls against shares the holder already owns and intends
+to keep (NVDA/PLTR/TQQQ) to **maximize income while minimizing call-away**, rather
+than maximizing total return on the leveraged trend sleeve. It does **not** revisit
+or overturn the negative overlay result.
+
+- **Added** `options/realized_iv.py` (realized-vol → `implied ≈ realized ×
+  vrp_mult` proxy IV → IV-Rank via the existing `compute_iv_rank`; fetch/cache to
+  `data/<TICKER>_history.csv`), `options/cc_income.py` (`CCConfig` +
+  `run_cc_income` event-driven daily sim with keep-shares intrinsic accounting,
+  50%-profit & 21-DTE rolls, income KPIs — annualized premium yield, keep rate,
+  total-return drag — plus standard CAGR/MaxDD/Sharpe/Calmar; `load_earnings_dates`
+  with yfinance→synthetic-quarterly fallback), and `options/cc_optimizer.py`
+  (60-config grid sweep Δ×DTE×IVR-gate×earnings-rule, `score_config` biased to max
+  premium yield with keep-rate ≥ 80% and drag ≤ 3 pp/yr, CLI writing a per-ticker
+  Markdown report with a recommended config per ticker). Reproduce with
+  `python -m options.cc_optimizer --tickers NVDA,PLTR,TQQQ --start 2020-01-01`.
+- **Changed** `options/greeks.py`: `get_strike_for_delta` / `spread_strikes` gained
+  optional `put_skew_mult` / `call_skew_mult` overrides defaulting to the module
+  constants — fully backward compatible.
+- **Collateral invariant** (`short_calls ≤ shares // 100`) is asserted in the sim
+  and covered by a test; daily NAV reconciles to `shares × price + cash`. Options
+  are cash-settled at intrinsic with the shares retained (overlay convention).
+  Backtest-grade ranking signal, **not tradeable P&L** — no bid/ask, commissions,
+  early assignment, or borrow; the realized-vol IV proxy is an approximation.
+- **Added** `docs/strategies/covered-call-income.md` and a clearly separated
+  "Covered-Call Income Optimizer" section in `options/README.md`. New offline tests
+  `tests/test_realized_iv.py`, `tests/test_cc_income.py`, `tests/test_cc_optimizer.py`,
+  and skew-override coverage in `tests/test_greeks.py`. 110 tests green.
+
+---
+
 ## [2026-08-19] — Feat: proxy-extended defensive-rotation backtest (finding downgraded)
 
 Wires the defensive rotation into a longer backtest using validated proxies — which

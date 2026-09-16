@@ -103,6 +103,8 @@ class GreeksEngine:
         base_sigma: float,
         target_delta: float,
         option_type: str = "put",
+        put_skew_mult: float | None = None,
+        call_skew_mult: float | None = None,
     ) -> tuple[float, dict]:
         """Solve for the strike whose delta magnitude equals ``target_delta``.
 
@@ -110,12 +112,20 @@ class GreeksEngine:
         returned strike matches where the real, skewed chain would place that
         delta. Returns ``(strike, greeks)`` where ``greeks`` is priced at the
         skew-adjusted vol.
+
+        ``put_skew_mult`` / ``call_skew_mult`` override the module-level
+        :data:`PUT_SKEW_MULT` / :data:`CALL_SKEW_MULT` when supplied (e.g. a
+        single-name study calibrating its own skew). Omitting them reproduces
+        the historical TQQQ behavior exactly, so the change is backward
+        compatible. Only the multiplier for ``option_type`` is consulted.
         """
         option_type = option_type.lower()
         if not 0.0 < target_delta < 1.0:
             raise ValueError(f"target_delta must be in (0, 1), got {target_delta}")
 
-        adj_sigma = base_sigma * (PUT_SKEW_MULT if option_type == "put" else CALL_SKEW_MULT)
+        put_mult = PUT_SKEW_MULT if put_skew_mult is None else put_skew_mult
+        call_mult = CALL_SKEW_MULT if call_skew_mult is None else call_skew_mult
+        adj_sigma = base_sigma * (put_mult if option_type == "put" else call_mult)
         sqrt_T = math.sqrt(T)
 
         # For a call, delta = N(d1) -> N(d1) = target_delta.
@@ -139,6 +149,8 @@ class GreeksEngine:
         short_delta: float,
         long_delta: float,
         option_type: str = "put",
+        put_skew_mult: float | None = None,
+        call_skew_mult: float | None = None,
     ) -> dict:
         """Build a two-leg vertical spread by delta.
 
@@ -147,9 +159,18 @@ class GreeksEngine:
         protection. For a put debit spread the roles invert (the larger-delta
         leg is bought) — callers interpret net_premium's sign: positive means a
         net credit received, negative means a net debit paid.
+
+        ``put_skew_mult`` / ``call_skew_mult`` are passed through to
+        :meth:`get_strike_for_delta` unchanged (default = module constants).
         """
-        short_K, short_g = cls.get_strike_for_delta(S, T, r, base_sigma, short_delta, option_type)
-        long_K, long_g = cls.get_strike_for_delta(S, T, r, base_sigma, long_delta, option_type)
+        short_K, short_g = cls.get_strike_for_delta(
+            S, T, r, base_sigma, short_delta, option_type,
+            put_skew_mult=put_skew_mult, call_skew_mult=call_skew_mult,
+        )
+        long_K, long_g = cls.get_strike_for_delta(
+            S, T, r, base_sigma, long_delta, option_type,
+            put_skew_mult=put_skew_mult, call_skew_mult=call_skew_mult,
+        )
         net_credit = short_g["price"] - long_g["price"]
         return {
             "short_strike": short_K,

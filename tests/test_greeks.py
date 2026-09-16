@@ -62,6 +62,49 @@ def test_put_skew_pushes_strike_further_from_spot():
     assert orig == PUT_SKEW_MULT == 1.20
 
 
+def test_call_skew_override_changes_strike():
+    # Default call skew is 0.95; forcing call_skew_mult=1.0 (no skew) prices the
+    # call at a higher vol, pushing the 20-delta strike further from spot.
+    S, T, r, base = 100.0, 35 / 365, 0.045, 0.30
+    K_default, _ = GreeksEngine.get_strike_for_delta(S, T, r, base, 0.20, "call")
+    K_noskew, _ = GreeksEngine.get_strike_for_delta(
+        S, T, r, base, 0.20, "call", call_skew_mult=1.0
+    )
+    assert CALL_SKEW_MULT == 0.95
+    assert K_default != K_noskew
+    # Higher vol (1.0 > 0.95) => the same delta sits at a higher strike.
+    assert K_noskew > K_default
+
+
+def test_call_skew_default_matches_constant():
+    # Passing the module default explicitly reproduces the default behavior.
+    S, T, r, base = 100.0, 30 / 365, 0.045, 0.30
+    K_a, _ = GreeksEngine.get_strike_for_delta(S, T, r, base, 0.15, "call")
+    K_b, _ = GreeksEngine.get_strike_for_delta(
+        S, T, r, base, 0.15, "call", call_skew_mult=CALL_SKEW_MULT
+    )
+    assert K_a == K_b
+
+
+def test_put_skew_override_changes_strike():
+    S, T, r, base = 100.0, 30 / 365, 0.045, 0.30
+    K_default, _ = GreeksEngine.get_strike_for_delta(S, T, r, base, 0.10, "put")
+    K_noskew, _ = GreeksEngine.get_strike_for_delta(
+        S, T, r, base, 0.10, "put", put_skew_mult=1.0
+    )
+    assert PUT_SKEW_MULT == 1.20
+    assert K_default != K_noskew
+
+
+def test_spread_strikes_forwards_skew_override():
+    S, T, r, base = 100.0, 30 / 365, 0.045, 0.30
+    default = GreeksEngine.spread_strikes(S, T, r, base, 0.30, 0.15, "put")
+    overridden = GreeksEngine.spread_strikes(
+        S, T, r, base, 0.30, 0.15, "put", put_skew_mult=1.0
+    )
+    assert default["short_strike"] != overridden["short_strike"]
+
+
 def test_spread_credit_sign():
     S, T, r, base = 100.0, 30 / 365, 0.045, 0.30
     spread = GreeksEngine.spread_strikes(S, T, r, base, 0.30, 0.15, "put")

@@ -143,3 +143,68 @@ python -m pytest tests/ -q
 > correctly and retries, but a throttled IP still can't fetch. Run the benchmark
 > on an unthrottled runner (e.g. the same GitHub Actions runner as
 > `daily_check.yaml`).
+
+---
+
+# Covered-Call Income Optimizer
+
+> **Different objective from the overlay above.** Everything up to this line is
+> the *total-return* overlay study on the leveraged trend sleeve (a **negative
+> result** — covered calls were the worst overlay). This section is a **separate
+> engine** for a separate question: writing calls against shares the holder
+> already owns and **intends to keep** (NVDA / PLTR / TQQQ), to maximize
+> **income** while minimizing call-away. It does **not** revisit or overturn the
+> negative overlay finding.
+
+The holder wants cash flow per unit of upside given up, so the engine biases
+toward **low delta / far OTM** and reports **keep rate** and **total-return
+drag** as first-class KPIs.
+
+## Modules
+
+| File | Role |
+|---|---|
+| `realized_iv.py` | Realized-vol → proxy IV (`implied ≈ realized × vrp_mult`) → IV-Rank (reuses `compute_iv_rank`). Fetch/cache `load_price_history` → `data/<TICKER>_history.csv`. |
+| `cc_income.py` | `CCConfig` + `run_cc_income` — event-driven daily covered-call sim with keep-shares intrinsic accounting, 50%-profit & 21-DTE rolls, income + standard KPIs. `load_earnings_dates` (yfinance → synthetic-quarterly fallback). |
+| `cc_optimizer.py` | `sweep` (Δ × DTE × IVR-gate × earnings-rule = 60 configs) + `score_config` (max premium yield, keep-rate ≥ 80%, drag ≤ 3 pp/yr) + CLI writing a per-ticker Markdown report with a recommended config per ticker. |
+| `greeks.py` | `get_strike_for_delta` / `spread_strikes` gained optional `put_skew_mult` / `call_skew_mult` overrides (default = module constants; fully backward compatible). |
+
+## Objective & KPIs
+
+- **Annualized premium yield** = `premium_collected / avg_position_value / years`
+  (the ranked metric).
+- **Keep rate** = `1 − assigned_cycles / total_cycles`; a cycle is "assigned"
+  when its short call is ITM at close (the 21-DTE roll pre-empts literal expiry).
+- **Total-return drag** = `buyhold_CAGR − strategy_CAGR`.
+
+## Accounting assumptions
+
+* **NAV = `shares × price + cash`**; cash accrues `cash_yield` and reflects
+  premium in / buybacks + intrinsic out. Buy & hold holds the identical shares +
+  starting cash, no options.
+* Options are **cash-settled at intrinsic on expiry — the shares are always
+  retained** (same convention as the overlay engine).
+* **Collateral invariant** — `covered_call_contracts(shares) ≤ shares // 100`
+  (zero naked calls), asserted in the sim on every open.
+* **IV is a realized-vol proxy** (`implied ≈ realized × vrp_mult`, per-ticker
+  ~1.10–1.20), not a live chain.
+* Skew is a fixed multiplicative call offset; earnings dates fall back to a
+  synthetic ~quarterly cadence when yfinance is unreachable.
+
+Backtest-grade ranking signal, **not tradeable P&L** — bid/ask, commissions,
+early assignment, borrow, and short-term-premium tax drag are not modeled.
+
+## Running
+
+```bash
+pip install -r requirements.txt
+
+# Per-ticker grid sweep + Markdown report (needs working yfinance egress):
+python -m options.cc_optimizer --tickers NVDA,PLTR,TQQQ --start 2020-01-01 \
+    --out docs/covered-call-income-2026-09-16.md
+
+# All logic is offline-unit-tested on synthetic series:
+python -m pytest tests/test_realized_iv.py tests/test_cc_income.py tests/test_cc_optimizer.py -q
+```
+
+Full write-up: [`docs/strategies/covered-call-income.md`](../docs/strategies/covered-call-income.md).
