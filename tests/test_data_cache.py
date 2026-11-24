@@ -55,3 +55,26 @@ def test_first_download_is_saved_to_data_folder(tmp_path, monkeypatch):
     out = sb.get_cached_data("^ABC")           # caret stripped for the filename
     assert (tmp_path / "ABC.csv").exists()
     assert out["Close"].tolist() == fetched["Close"].tolist()
+
+
+def test_refresh_without_persist_downloads_and_leaves_disk_untouched(tmp_path, monkeypatch):
+    stale = _ohlc(pd.date_range("2000-01-03", periods=3, freq="D"))
+    stale.to_csv(tmp_path / "FAKE.csv")
+    before = (tmp_path / "FAKE.csv").read_text()
+    fresh = _ohlc(pd.date_range("2000-01-03", periods=6, freq="D"))
+    monkeypatch.setattr(sb.yf, "download", lambda *a, **k: fresh)
+
+    out = sb.get_cached_data("FAKE", refresh=True, persist=False)
+
+    assert len(out) == 6                      # fresh bars, not the stale file
+    assert (tmp_path / "FAKE.csv").read_text() == before
+    assert len(sb.get_cached_data("FAKE")) == 6   # later reads hit the fresh in-memory copy
+
+
+def test_bot_refreshes_index_data_used_by_dual_signal(monkeypatch):
+    import bot
+    calls = []
+    monkeypatch.setattr(bot, "get_cached_data",
+                        lambda t, refresh=False, persist=True: calls.append((t, refresh, persist)))
+    bot.refresh_live_index_data()
+    assert calls == [("^NDX", True, False), ("^GSPC", True, False), ("^VIX", True, False)]

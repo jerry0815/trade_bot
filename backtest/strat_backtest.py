@@ -60,13 +60,14 @@ def _data_path(ticker):
     return DATA_DIR / f"{ticker.replace('^', '')}.csv"
 
 
-def get_cached_data(ticker="^NDX", refresh=False):
+def get_cached_data(ticker="^NDX", refresh=False, persist=True):
     """Fetches raw data once and caches it, in memory and on disk.
 
     Lookup order: in-memory cache -> data/<ticker>.csv -> yfinance download
     (which is then written to disk for next time). Pass refresh=True to force a
     fresh download and overwrite the saved file (e.g. to pick up new bars after
-    market close).
+    market close). persist=False keeps a download in memory only, so a live
+    run never rewrites the committed data/ snapshot.
     """
     if refresh:
         DATA_CACHE.pop(ticker, None)
@@ -82,8 +83,9 @@ def get_cached_data(ticker="^NDX", refresh=False):
             df = yf.download(ticker, start="1985-01-01", progress=False, auto_adjust=False)
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.get_level_values(0)
-            DATA_DIR.mkdir(parents=True, exist_ok=True)
-            df.to_csv(path)
+            if persist:
+                DATA_DIR.mkdir(parents=True, exist_ok=True)
+                df.to_csv(path)
         DATA_CACHE[ticker] = df
     return DATA_CACHE[ticker].copy()
 

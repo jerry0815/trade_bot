@@ -6,7 +6,19 @@ import sys
 if sys.stdout.encoding.lower() != 'utf-8':
     sys.stdout.reconfigure(encoding='utf-8')
 
-from backtest.strat_backtest import SMATrendFollowing, DualSignalAgreement, _download_with_retry, get_current_defensive_rotation
+from backtest.strat_backtest import (SMATrendFollowing, DualSignalAgreement, _download_with_retry,
+                                     get_current_defensive_rotation, get_cached_data)
+
+# DualSignalAgreement reads ^NDX/^GSPC (and ^VIX) through get_cached_data, which
+# prefers the committed data/*.csv snapshot. That snapshot is frozen at the date
+# it was saved, so a live report must re-download these every run or the
+# recommended action and trailing stop are computed on stale prices.
+LIVE_INDEX_TICKERS = ("^NDX", "^GSPC", "^VIX")
+
+
+def refresh_live_index_data():
+    for ticker in LIVE_INDEX_TICKERS:
+        get_cached_data(ticker, refresh=True, persist=False)
 
 def generate_market_report(strategy, strategy_d, strategy_d_notax, monitor_ticker="QQQ", leveraged_ticker="TQQQ", sp500_ticker="SPY"):
     """
@@ -119,6 +131,7 @@ def generate_market_report(strategy, strategy_d, strategy_d_notax, monitor_ticke
 
 def run_bot():
     webhook_url = os.environ.get("DISCORD_WEBHOOK")
+    refresh_live_index_data()
 
     strat = SMATrendFollowing(sma_window=200, t2_confirmation=True)
     strat_d = DualSignalAgreement(sma_window=200, atr_multiplier=2.5, t2_confirmation=False,
