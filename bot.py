@@ -20,6 +20,21 @@ def refresh_live_index_data():
     for ticker in LIVE_INDEX_TICKERS:
         get_cached_data(ticker, refresh=True, persist=False)
 
+def status_note(trend, stats):
+    """Explains a Status that disagrees with the Duration line. Status is
+    today's close against the ATR band; the position only flips after the
+    T+2 confirmation, so a single close outside the band leaves it as is."""
+    if stats.get("signal_changed"):
+        verb = "BUY" if stats["action"].startswith("BUY") else "SELL"
+        return f" — confirmed, {verb} at next open"
+    invested_next = stats.get("action", "").startswith("BUY")
+    if trend == "BEARISH" and invested_next:
+        return " — below lower band, sell not confirmed yet (needs 2 closes in a row)"
+    if trend == "BULLISH" and not invested_next:
+        return " — above upper band, buy not confirmed yet (needs 2 closes in a row)"
+    return ""
+
+
 def generate_market_report(strategy, strategy_d, strategy_d_notax, monitor_ticker="QQQ", leveraged_ticker="TQQQ", sp500_ticker="SPY"):
     """
     Fetches strategy stats and formats them into your report template.
@@ -51,21 +66,26 @@ def generate_market_report(strategy, strategy_d, strategy_d_notax, monitor_ticke
     # stop OFF vs 19.82% with it ON) — so a taxable account should skip it.
     stats_d_notax = strategy_d_notax.get_live_stats(sp500_ticker, leveraged_ticker, data=shared_data)
 
-    # A change is D's recommended action being new as of today (a fresh entry,
-    # or an exit including a stop-triggered one). days_in_current_state == 1
-    # means today is the first day of the current state.
-    signal_changed = stats_d["days_in_current_state"] == 1
-    change_alert = "🔄 **Signal Change Detected!**" if signal_changed else "✅ Status: No change in signal."
+    # A change is an account's recommended action for the next open differing
+    # from the position it held today (a fresh entry, or an exit including a
+    # stop-triggered one), so the alert fires the evening the trade is due.
+    changed = [name for name, st in (("tax-advantaged", stats_d), ("taxable", stats_d_notax))
+               if st["signal_changed"]]
+    if changed:
+        change_alert = f"🔄 **Signal Change Detected!** Trade at next open: {' and '.join(changed)} account"
+    else:
+        change_alert = "✅ Status: No change in signal."
 
     date_str = pd.Timestamp.now().strftime("%Y-%m-%d")
 
     def format_signal_section(title, ticker, stats):
-        state_label = "invested" if stats.get("action", "").startswith("BUY") else "in cash"
+        state_label = stats.get("position", "N/A")
         streak_days = stats.get("days_in_current_state", 0)
         state_since = stats.get("state_since", "N/A")
         
         trend = stats.get('trend', 'N/A')
         emoji = "🟩" if trend == "BULLISH" else "🟥" if trend == "BEARISH" else "🟨"
+        trend_note = status_note(trend, stats)
         
         upper = stats.get('upper_bound', 0.0)
         lower = stats.get('lower_bound', 0.0)
@@ -74,7 +94,7 @@ def generate_market_report(strategy, strategy_d, strategy_d_notax, monitor_ticke
             f"📈 **{title} ({ticker})**\n"
             f"• Price: {stats['qqq_price']:.2f} | SMA(200): {stats.get('current_sma', 0.0):.2f}\n"
             f"• ATR Channel: {lower:.2f} - {upper:.2f}\n"
-            f"• Status: **{trend}** {emoji}\n"
+            f"• Status: **{trend}** {emoji}{trend_note}\n"
             f"• Duration: {streak_days} trading days {state_label} (since {state_since})"
         )
 
@@ -96,6 +116,9 @@ def generate_market_report(strategy, strategy_d, strategy_d_notax, monitor_ticke
         }[ts["state"]]
         return f"{header}\n{price_lines}• Status: {status}"
 
+    def changed_tag(stats):
+        return " 🔄 (new — trade at next open)" if stats["signal_changed"] else ""
+
     winner = def_rot['winner']
     display_winner = "SHY / SGOV" if winner == "SHY" else winner
     moms = def_rot['momentums']
@@ -110,6 +133,7 @@ def generate_market_report(strategy, strategy_d, strategy_d_notax, monitor_ticke
 
     message = (
         f"📅 **Market Monitor Report ({date_str})**\n"
+        f"ⓘ Recommended actions are for the next market open.\n"
         f"{change_alert}\n"
         f"--------------------------\n"
         f"{format_signal_section('PRIMARY SIGNAL - S&P 500', sp500_ticker, stats_sp500)}\n\n"
@@ -122,8 +146,8 @@ def generate_market_report(strategy, strategy_d, strategy_d_notax, monitor_ticke
         f"{format_trailing_stop(ts)}\n"
         f"--------------------------\n"
         f"🚩 **RECOMMENDED ACTION**\n"
-        f"• Tax-advantaged account (IRA/401k/Roth) — dual-signal + trailing stop: **{stats_d['action']}**\n"
-        f"• Taxable account — dual-signal, no trailing stop: **{stats_d_notax['action']}**\n"
+        f"• Tax-advantaged account (IRA/401k/Roth) — dual-signal + trailing stop: **{stats_d['action']}**{changed_tag(stats_d)}\n"
+        f"• Taxable account — dual-signal, no trailing stop: **{stats_d_notax['action']}**{changed_tag(stats_d_notax)}\n"
         f"  ⓘ Taxable drops the stop: after tax its extra trades realize short-term gains and hurt returns (Table 8)."
     )
     

@@ -243,12 +243,25 @@ class BaseStrategy:
             )
 
         # 2. Process data
-        self.df = prep_base_indicators(df, vix['Close'])
-        self.df = self._add_indicator_logic(self.df)
+        base = prep_base_indicators(df, vix['Close'])
+        self.df = self._add_indicator_logic(base)
 
-        # 3. Count consecutive trading days in the current state (hold or cash streak)
+        # in_market is the EXECUTION-day column: today's row is the position
+        # held during today's session, decided on yesterday's close. A report
+        # run after today's close needs the position for the NEXT open, so
+        # re-run the logic with one placeholder next-trading-day row appended
+        # (a copy of today's bar). Every decision for that row uses only
+        # information up to today's close (signals are shifted by a day and
+        # the stops read the lagged close), so the placeholder's own values
+        # never matter and its in_market is exactly tomorrow's position.
+        next_row = base.iloc[[-1]].copy()
+        next_row.index = pd.DatetimeIndex([base.index[-1] + pd.offsets.BDay(1)], name=base.index.name)
+        self.df_next = self._add_indicator_logic(pd.concat([base, next_row]))
+
+        # 3. Count consecutive trading days in the current (held) position
         in_market_vals = self.df['in_market'].values
         current_state  = bool(in_market_vals[-1])
+        next_state     = bool(self.df_next['in_market'].iloc[-1])
         streak = 0
         for v in reversed(in_market_vals):
             if bool(v) == current_state:
@@ -258,11 +271,14 @@ class BaseStrategy:
         # Derive the calendar date the current streak started
         state_since = self.df.index[-streak] if streak <= len(self.df) else self.df.index[0]
 
-        # 4. Return the base report stats
+        # 4. Return the base report stats. "action" is what to hold from the
+        # next open; "position" is what was held today.
         return {
             "qqq_price"      : float(self.df['Close'].iloc[-1].item()),
             "leveraged_price": float(leveraged_df['Close'].iloc[-1]),
-            "action"               : "BUY/HOLD" if current_state else "SELL/CASH",
+            "action"               : "BUY/HOLD" if next_state else "SELL/CASH",
+            "position"             : "invested" if current_state else "in cash",
+            "signal_changed"       : next_state != current_state,
             "days_in_current_state": int(streak),
             "state_since"          : state_since.strftime("%Y-%m-%d"),
         }
@@ -813,8 +829,13 @@ class DualSignalAgreement(BaseStrategy):
         # self.df now carries in_market (post-stop) and, when the stop is on,
         # trend_in_market (pre-stop). action in `stats` already reflects the
         # post-stop column, i.e. D's verdict.
-        gspc_close = get_cached_signals("^GSPC")["Close"].reindex(self.df.index).ffill()
-        stats["trailing_stop"] = self._trailing_stop_status(self.df, price=gspc_close)
+        # Stop status as of the next open (df_next), so a breach at today's
+        # close reads "triggered" in tonight's report, matching "action".
+        gspc_close = get_cached_signals("^GSPC")["Close"].reindex(self.df_next.index).ffill()
+        # The placeholder row stands for "after today's close": show today's
+        # close there, never a later bar the index cache may already hold.
+        gspc_close.iloc[-1] = gspc_close.iloc[-2]
+        stats["trailing_stop"] = self._trailing_stop_status(self.df_next, price=gspc_close)
         return stats
 
 class DynamicLeverageTrend(BaseStrategy):
